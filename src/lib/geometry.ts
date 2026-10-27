@@ -95,3 +95,40 @@ export function motionEnergy(frames: Frame[]): number[] {
 export function firstValid(frames: Frame[]): Frame | undefined {
   return frames.find((f) => f.lm);
 }
+
+/** Interior angle at `b` in degrees, 3D. */
+export function angleAt3D(a: Pt, b: Pt, c: Pt): number {
+  const v1 = { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+  const v2 = { x: c.x - b.x, y: c.y - b.y, z: c.z - b.z };
+  const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+  const m = Math.hypot(v1.x, v1.y, v1.z) * Math.hypot(v2.x, v2.y, v2.z);
+  if (m === 0) return 0;
+  return (Math.acos(Math.max(-1, Math.min(1, dot / m))) * 180) / Math.PI;
+}
+
+type Side = ReturnType<typeof lead>;
+
+/**
+ * Knee angle (hip-knee-ankle, 180 = locked) for one side of one frame. Prefers the 3D world
+ * landmarks: face-on, knee flex points at the camera, so the 2D image angle reads ~180° whether
+ * the knee is soft or locked. Falls back to 2D when there are no world landmarks. NaN when the
+ * leg is not visible enough to trust.
+ */
+export function kneeAngle(f: Frame, side: Side): number {
+  if (!f.lm) return NaN;
+  const vis = Math.min(
+    f.lm[side.hip].visibility ?? 1,
+    f.lm[side.knee].visibility ?? 1,
+    f.lm[side.ankle].visibility ?? 1
+  );
+  if (vis < 0.5) return NaN;
+  const w = f.world;
+  if (w) return angleAt3D(w[side.hip], w[side.knee], w[side.ankle]);
+  return angleAt(f.lm[side.hip], f.lm[side.knee], f.lm[side.ankle]);
+}
+
+/** Smoothed per-frame trail knee angle (NaN where unknown). */
+export function trailKneeSeries(frames: Frame[], hand: Handedness): number[] {
+  const t = trail(hand);
+  return smooth(frames.map((f) => kneeAngle(f, t)), 2);
+}

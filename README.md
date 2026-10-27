@@ -16,13 +16,14 @@ Open http://localhost:5180, pick a clip, set fps to match the clip (60 for stand
 - `src/lib/pose.ts` seeks the video frame by frame and runs MediaPipe PoseLandmarker on each one (33 landmarks, normalized + world coords).
 - `src/lib/positions.ts` finds P1-P6 from landmark motion alone: impact = fastest hands refined to "hands back at address", address = last quiet window before that, top = highest hands, P2/P5 = hands crossing hip height, finish = motion settles. Every position can be overridden with the `set` button under each P.
 - `src/lib/metrics.ts` measures body-only metrics per camera view (early extension, spine angle maintenance, head sway, lead arm, hip position at impact, tempo, etc.), compares each to a reference range and deducts proportionally. Score = 10 minus deductions. Reference ranges are hand-tuned, not tour data; tweak them in that file.
+- Trail knee: `geometry.ts` measures the hip-knee-ankle angle from the 3D world landmarks (the 2D angle reads ~180° face-on whatever the knee does). `metrics.ts` deducts when it straightens by more than 15° between P1 and P3, in both views; extra flex is never penalised.
 - `src/components/Analyzer.tsx` is the client component mounted by `app/page.tsx`; Tailwind v4 via `@tailwindcss/postcss`.
 - `src/components/Overlay.tsx` draws the skeleton plus reference lines locked from address (head box, spine, hip wall, toe line, estimated shaft plane for DTL; ankle lines and shoulder line for face-on).
 
 ## Keyboard
 
 - `←` / `→` step one frame (`shift` = 5)
-- `space` play / pause
+- `space` play / pause, `l` toggle loop; speed buttons (0.25x to 1x) sit next to the transport
 - `1`..`6` jump to P1..P6
 
 ## Known limits

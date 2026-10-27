@@ -1,5 +1,5 @@
 import { Analysis, CameraView, Frame, Handedness, LM, Metric, Positions, Pt } from "@/lib/types";
-import { angleAt, hands, hipMid, lead, shoulderMid, shoulderWidth, tiltFromVertical, torsoLen, trail } from "@/lib/geometry";
+import { angleAt, hands, hipMid, lead, shoulderMid, shoulderWidth, tiltFromVertical, torsoLen, trail, trailKneeSeries } from "@/lib/geometry";
 import { ClubProfile } from "@/lib/clubs";
 
 /**
@@ -60,6 +60,31 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     tip: tempo < 2.5 ? "Backswing is rushed relative to the downswing. Try a slower takeaway." : "Downswing is slow relative to the backswing. Commit through the ball.",
     positions: ["P1", "P3", "P4"],
   });
+
+  // Trail knee lock: the trail knee should keep the flex it had at address through the backswing.
+  // Straightening it kills the trail-hip load and usually brings sway with it. One-sided on purpose:
+  // extra flex going back is never penalised. 3D angle, so it works from either camera view.
+  const kneeSeries = trailKneeSeries(frames, hand);
+  const kneeP1 = kneeSeries[pos.P1];
+  if (Number.isFinite(kneeP1)) {
+    const from = Math.min(pos.P1, pos.P3);
+    const to = Math.max(pos.P1, pos.P3);
+    let peak = pos.P1;
+    for (let i = from; i <= to; i++) if (kneeSeries[i] > kneeSeries[peak]) peak = i;
+    const straighten = Math.max(0, kneeSeries[peak] - kneeP1);
+    metrics.push({
+      id: "trailKnee",
+      label: "Trail knee lock in backswing",
+      value: r1(straighten),
+      unit: `° straighter than address (${r1(kneeP1)}° to ${r1(kneeSeries[peak])}°, 180 = locked)`,
+      target: "under 15°",
+      deduction: deduct(straighten, { lo: -Infinity, hi: 15, tol: 15 }, 1.5),
+      maxDeduction: 1.5,
+      tip: "Trail knee straightens going back and locks. Keep the flex you set at address all the way to the top: feel the trail knee stay bent and pointing at the ball while the hips turn behind you.",
+      positions: ["P1", "P2", "P3"],
+      frame: peak,
+    });
+  }
 
   if (view === "faceOn") {
     // Head sway: nose x displacement toward/away from target, in shoulder widths.

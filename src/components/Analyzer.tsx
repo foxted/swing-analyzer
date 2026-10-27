@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Overlay from "./Overlay";
-import Timeline from "./Timeline";
+import Timeline, { Rate } from "./Timeline";
 import ScorePanel from "./ScorePanel";
 import { extractFrames, ModelSize } from "@/lib/pose";
 import { detectPositions, detectView } from "@/lib/positions";
@@ -30,6 +30,8 @@ export default function Analyzer() {
   const [positions, setPositions] = useState<Positions | null>(null);
   const [current, setCurrent] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [rate, setRate] = useState<Rate>(1);
+  const [loop, setLoop] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [show, setShow] = useState({ skeleton: true, lines: true, ghost: false });
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +105,7 @@ export default function Analyzer() {
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !playing) return;
+    v.playbackRate = rate;
     v.play().catch(() => setPlaying(false));
     let raf = 0;
     const tick = () => {
@@ -117,7 +120,12 @@ export default function Analyzer() {
       v.removeEventListener("ended", onEnd);
       v.pause();
     };
-  }, [playing, fps, frames.length]);
+  }, [playing, fps, frames.length, rate]);
+
+  // Speed changes apply live, without restarting playback.
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.playbackRate = rate;
+  }, [rate]);
 
   // Keyboard: arrows step frames (shift = 5), space toggles play, 1-6 jump to P1-P6.
   useEffect(() => {
@@ -130,7 +138,8 @@ export default function Analyzer() {
       else if (e.key === " ") {
         e.preventDefault();
         setPlaying((p) => !p);
-      } else if (/^[1-6]$/.test(e.key) && positions) seekTo(positions[`P${e.key}` as PositionKey]);
+      } else if (e.key === "l" || e.key === "L") setLoop((l) => !l);
+      else if (/^[1-6]$/.test(e.key) && positions) seekTo(positions[`P${e.key}` as PositionKey]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -143,8 +152,8 @@ export default function Analyzer() {
   const busy = stage === "processing" || stage === "loading-model";
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="flex flex-wrap items-center gap-4 border-b border-line px-5 py-3">
+    <div className="flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
+      <header className="flex shrink-0 flex-wrap items-center gap-4 border-b border-line px-5 py-3">
         <h1 className="text-base font-semibold tracking-wide">Swing Analyzer</h1>
         <div className="flex flex-wrap items-center gap-3">
           <label className="max-w-64 cursor-pointer truncate rounded-md border border-dashed border-line bg-panel-2 px-3 py-1.5 text-sm">
@@ -215,10 +224,10 @@ export default function Analyzer() {
         </div>
       </header>
 
-      {error && <div className="mx-5 mt-3 rounded-md border border-bad bg-red-950 px-3 py-2 text-sm">{error}</div>}
+      {error && <div className="mx-5 mt-3 shrink-0 rounded-md border border-bad bg-red-950 px-3 py-2 text-sm">{error}</div>}
 
-      <main className={`grid flex-1 gap-4 p-5 ${stage === "ready" ? "lg:grid-cols-[minmax(0,1fr)_380px]" : "grid-cols-1"}`}>
-        <section className="flex min-w-0 flex-col gap-3">
+      <main className={`grid flex-1 gap-4 p-5 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden ${stage === "ready" ? "lg:grid-cols-[minmax(0,1fr)_380px]" : "grid-cols-1"}`}>
+        <section className="flex min-w-0 flex-col gap-3 lg:min-h-0">
           {!src && (
             <div
               className="rounded-xl border-2 border-dashed border-line px-5 py-20 text-center text-muted"
@@ -234,7 +243,7 @@ export default function Analyzer() {
           )}
           {src && (
             <div
-              className="relative mx-auto max-h-[72vh] overflow-hidden rounded-xl bg-black"
+              className="relative mx-auto max-h-[72vh] max-w-full overflow-hidden rounded-xl bg-black lg:min-h-0 lg:max-h-none lg:flex-1"
               style={{ aspectRatio: dims.w && dims.h ? `${dims.w} / ${dims.h}` : "9 / 16" }}
             >
               <video
@@ -242,10 +251,12 @@ export default function Analyzer() {
                 src={src}
                 playsInline
                 muted
+                loop={loop}
                 preload="auto"
                 className="block h-full w-full object-contain"
                 onLoadedMetadata={(e) => {
                   const v = e.currentTarget;
+                  v.playbackRate = rate;
                   setDims({ w: v.videoWidth, h: v.videoHeight });
                 }}
               />
@@ -261,7 +272,7 @@ export default function Analyzer() {
           )}
           {stage === "ready" && positions && (
             <>
-              <div className="flex items-center gap-4 text-xs text-muted">
+              <div className="flex shrink-0 items-center gap-4 text-xs text-muted">
                 {(["skeleton", "lines", "ghost"] as const).map((k) => (
                   <label key={k} className="flex items-center gap-1.5">
                     <input type="checkbox" checked={show[k]} onChange={(e) => setShow({ ...show, [k]: e.target.checked })} />
@@ -275,14 +286,18 @@ export default function Analyzer() {
                 current={current}
                 positions={positions}
                 playing={playing}
+                rate={rate}
+                loop={loop}
                 onSeek={seekTo}
                 onTogglePlay={() => setPlaying((p) => !p)}
+                onRate={setRate}
+                onToggleLoop={() => setLoop((l) => !l)}
                 onSetPosition={setPosition}
               />
             </>
           )}
         </section>
-        {stage === "ready" && <ScorePanel analysis={analysis} onJump={(k) => positions && seekTo(positions[k])} />}
+        {stage === "ready" && <ScorePanel analysis={analysis} onJump={(k) => positions && seekTo(positions[k])} onSeek={seekTo} />}
       </main>
     </div>
   );

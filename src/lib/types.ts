@@ -35,6 +35,8 @@ export type Metric = {
   maxDeduction: number;
   tip: string;
   positions: PositionKey[];
+  /** Frame where the measured peak happened, when the metric is not tied to a single P-position. */
+  frame?: number;
 };
 
 export type Analysis = {

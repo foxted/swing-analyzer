@@ -2,16 +2,16 @@
 
 import { Analysis, PositionKey } from "@/lib/types";
 
-type Props = { analysis: Analysis | null; onJump: (k: PositionKey) => void };
+type Props = { analysis: Analysis | null; onJump: (k: PositionKey) => void; onSeek: (i: number) => void };
 
-export default function ScorePanel({ analysis, onJump }: Props) {
+export default function ScorePanel({ analysis, onJump, onSeek }: Props) {
   if (!analysis) return null;
   const { score, metrics } = analysis;
   const worst = [...metrics].sort((a, b) => b.deduction - a.deduction).filter((m) => m.deduction >= 0.3);
   const tone = score >= 8 ? "text-accent" : score >= 6 ? "text-warn" : "text-bad";
 
   return (
-    <aside className="sticky top-4 flex max-h-[calc(100vh-2rem)] flex-col gap-5 self-start overflow-auto rounded-xl border border-line bg-panel p-4">
+    <aside className="flex flex-col gap-5 overflow-auto rounded-xl border border-line bg-panel p-4 lg:min-h-0">
       <div>
         <div className="flex items-baseline gap-2">
           <span className={`text-6xl font-bold leading-none ${tone}`}>{score.toFixed(1)}</span>
@@ -37,6 +37,11 @@ export default function ScorePanel({ analysis, onJump }: Props) {
                       {p}
                     </button>
                   ))}
+                  {m.frame !== undefined && (
+                    <button className="rounded border border-line px-2 py-0.5 text-[11px] text-warn hover:border-muted" onClick={() => onSeek(m.frame!)} title="Jump to the frame where it peaked">
+                      peak #{m.frame}
+                    </button>
+                  )}
                 </div>
               </li>
             ))}
