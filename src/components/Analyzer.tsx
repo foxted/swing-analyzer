@@ -8,6 +8,7 @@ import { extractFrames, ModelSize } from "@/lib/pose";
 import { detectPositions, detectView } from "@/lib/positions";
 import { analyse } from "@/lib/metrics";
 import { CameraView, Frame, Handedness, PositionKey, Positions } from "@/lib/types";
+import { CLUB_KEYS, CLUBS, ClubType } from "@/lib/clubs";
 
 type Stage = "idle" | "loading-model" | "processing" | "ready";
 
@@ -21,6 +22,7 @@ export default function Analyzer() {
   const [fps, setFps] = useState(60);
   const [model, setModel] = useState<ModelSize>("full");
   const [hand, setHand] = useState<Handedness>("right");
+  const [club, setClub] = useState<ClubType>("iron");
   const [viewOverride, setViewOverride] = useState<CameraView | "auto">("auto");
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -39,8 +41,8 @@ export default function Analyzer() {
   );
 
   const analysis = useMemo(
-    () => (positions && frames.length ? analyse(frames, positions, view, hand) : null),
-    [frames, positions, view, hand]
+    () => (positions && frames.length ? analyse(frames, positions, view, hand, CLUBS[club]) : null),
+    [frames, positions, view, hand, club]
   );
 
   const onFile = (file: File) => {
@@ -168,6 +170,16 @@ export default function Analyzer() {
             </select>
           </label>
           <label className={labelCls}>
+            club
+            <select className={selectCls} value={club} onChange={(e) => setClub(e.target.value as ClubType)}>
+              {CLUB_KEYS.map((k) => (
+                <option key={k} value={k}>
+                  {CLUBS[k].label.toLowerCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={labelCls}>
             hand
             <select className={selectCls} value={hand} onChange={(e) => setHand(e.target.value as Handedness)}>
               <option value="right">right</option>
@@ -238,7 +250,7 @@ export default function Analyzer() {
                 }}
               />
               {dims.w > 0 && (
-                <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} show={show} />
+                <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} club={CLUBS[club]} show={show} />
               )}
               {stage === "processing" && (
                 <div className="absolute inset-x-0 bottom-0 h-1 bg-white/15">

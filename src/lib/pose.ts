@@ -11,6 +11,17 @@ export type ModelSize = keyof typeof MODELS;
 
 let landmarker: PoseLandmarker | null = null;
 let loadedModel: ModelSize | null = null;
+let lastTimestamp = 0;
+
+/**
+ * VIDEO mode demands strictly increasing timestamps for the lifetime of a landmarker instance,
+ * across runs and across videos. Wall-clock since page load satisfies that regardless of module
+ * state (which Fast Refresh can reset), with a +1 guard for calls inside the same millisecond.
+ */
+function nextTimestamp(): number {
+  lastTimestamp = Math.max(lastTimestamp + 1, Math.floor(performance.now()));
+  return lastTimestamp;
+}
 
 export async function getLandmarker(model: ModelSize): Promise<PoseLandmarker> {
   if (landmarker && loadedModel === model) return landmarker;
@@ -59,7 +70,7 @@ export async function extractFrames(
     const t = i / fps;
     await seek(video, Math.min(t, video.duration - 1e-3));
     const timeMs = Math.round(t * 1000);
-    const res = lm.detectForVideo(video, timeMs + i * 0.001);
+    const res = lm.detectForVideo(video, nextTimestamp());
     const pose = res.landmarks[0] ?? null;
     const world = res.worldLandmarks[0] ?? null;
     frames.push({ index: i, timeMs, lm: pose, world });

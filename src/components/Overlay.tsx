@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { CameraView, Frame, Handedness, LM, Pt, SKELETON } from "@/lib/types";
 import { hands, hipMid, lead, shoulderMid, torsoLen } from "@/lib/geometry";
+import { ClubProfile } from "@/lib/clubs";
 
 type Props = {
   width: number;
@@ -11,6 +12,7 @@ type Props = {
   address: Frame | undefined; // P1, used for the locked reference lines
   view: CameraView;
   hand: Handedness;
+  club: ClubProfile;
   show: { skeleton: boolean; lines: boolean; ghost: boolean };
 };
 
@@ -23,7 +25,7 @@ const C = {
   ghost: "rgba(255,255,255,0.28)",
 };
 
-export default function Overlay({ width, height, frame, address, view, hand, show }: Props) {
+export default function Overlay({ width, height, frame, address, view, hand, club, show }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -71,23 +73,25 @@ export default function Overlay({ width, height, frame, address, view, hand, sho
         ctx.lineTo(toes.x, height);
         ctx.stroke();
 
-        // Estimated shaft plane: from hands down toward the ball, ball assumed ~0.9 torso lengths outside the toes at ankle height.
+        // Shaft plane: a line through the hands at the club's address shaft angle, down to the ground
+        // on the ball side and extended up through the body. Angle comes from the selected club.
         const h = px(hands(a));
         const dir = hands(a).x > hipMid(a).x ? 1 : -1;
-        const ankleY = ((a[LM.leftAnkle].y + a[LM.rightAnkle].y) / 2) * height;
-        const ball = { x: toes.x + dir * T * 0.9, y: ankleY + T * 0.05 };
-        const dx = ball.x - h.x;
-        const dy = ball.y - h.y;
-        const ext = 2.2;
+        const groundY = ((a[LM.leftAnkle].y + a[LM.rightAnkle].y) / 2) * height + T * 0.05;
+        const rad = (club.shaftAngle * Math.PI) / 180;
+        const dx = dir * Math.cos(rad);
+        const dy = Math.sin(rad);
+        const down = (groundY - h.y) / dy;
+        const up = Math.hypot(width, height);
         ctx.setLineDash([]);
         ctx.strokeStyle = C.ref;
         ctx.beginPath();
-        ctx.moveTo(h.x - dx * ext, h.y - dy * ext);
-        ctx.lineTo(ball.x, ball.y);
+        ctx.moveTo(h.x - dx * up, h.y - dy * up);
+        ctx.lineTo(h.x + dx * down, h.y + dy * down);
         ctx.stroke();
         ctx.fillStyle = C.ref;
         ctx.font = `${Math.round(lw * 5)}px system-ui`;
-        ctx.fillText("shaft plane (est.)", h.x - dx * ext + 6, h.y - dy * ext + 14);
+        ctx.fillText(`shaft plane · ${club.label.toLowerCase()} ${club.shaftAngle}°`, h.x + dx * down * 0.5 + 6, h.y + dy * down * 0.5);
       } else {
         // Face-on: vertical lines through both ankles (sway / slide references).
         for (const idx of [LM.leftAnkle, LM.rightAnkle]) {
@@ -97,6 +101,26 @@ export default function Overlay({ width, height, frame, address, view, hand, sho
           ctx.lineTo(p.x, height);
           ctx.stroke();
         }
+        // Expected ball position for the selected club: 0 = stance centre, 1 = lead heel.
+        const L = lead(hand);
+        const T2 = trailIdx(hand);
+        const leadHeel = px(a[L.ankle]).x;
+        const trailHeel = px(a[T2]).x;
+        const centre = (leadHeel + trailHeel) / 2;
+        const ballX = centre + (leadHeel - centre) * club.ballPosition;
+        const groundY = Math.max(px(a[LM.leftAnkle]).y, px(a[LM.rightAnkle]).y) + T * 0.05;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(ballX, 0);
+        ctx.lineTo(ballX, height);
+        ctx.stroke();
+        ctx.fillStyle = C.ref;
+        ctx.beginPath();
+        ctx.arc(ballX, groundY, lw * 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.font = `${Math.round(lw * 5)}px system-ui`;
+        ctx.fillText(`ball · ${club.label.toLowerCase()}`, ballX + 6, groundY - 8);
+        ctx.setLineDash([8, 6]);
         // Shoulder tilt line
         const ls = px(a[LM.leftShoulder]);
         const rs = px(a[LM.rightShoulder]);
@@ -118,10 +142,12 @@ export default function Overlay({ width, height, frame, address, view, hand, sho
       const L = lead(hand);
       drawSkeleton(ctx, frame.lm, px, lw, C.bone, C.joint, C.leadArm, [L.shoulder, L.elbow, L.wrist]);
     }
-  }, [width, height, frame, address, view, hand, show]);
+  }, [width, height, frame, address, view, hand, club, show]);
 
   return <canvas ref={ref} className="pointer-events-none absolute inset-0 h-full w-full" />;
 }
+
+const trailIdx = (h: Handedness) => (h === "right" ? LM.rightAnkle : LM.leftAnkle);
 
 function drawSkeleton(
   ctx: CanvasRenderingContext2D,

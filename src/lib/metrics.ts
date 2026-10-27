@@ -1,5 +1,6 @@
 import { Analysis, CameraView, Frame, Handedness, LM, Metric, Positions, Pt } from "@/lib/types";
 import { angleAt, hands, hipMid, lead, shoulderMid, shoulderWidth, tiltFromVertical, torsoLen, trail } from "@/lib/geometry";
+import { ClubProfile } from "@/lib/clubs";
 
 /**
  * Explainable scoring. Each metric compares a measured value to a reference range and
@@ -29,7 +30,7 @@ function pick(frames: Frame[], i: number): Pt[] | null {
   return frames[i]?.lm ?? null;
 }
 
-export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand: Handedness): Analysis {
+export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand: Handedness, club: ClubProfile): Analysis {
   const p1 = pick(frames, pos.P1);
   const p2 = pick(frames, pos.P2);
   const p3 = pick(frames, pos.P3);
@@ -80,10 +81,10 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       label: "Head position at impact",
       value: r1(swayImpact * 100),
       unit: "% shoulder width (toward target)",
-      target: "-15 to 10%",
-      deduction: deduct(swayImpact, { lo: -0.15, hi: 0.1, tol: 0.3 }, 1.5),
+      target: `${club.headAtImpact[0] * 100} to ${club.headAtImpact[1] * 100}%`,
+      deduction: deduct(swayImpact, { lo: club.headAtImpact[0], hi: club.headAtImpact[1], tol: 0.3 }, 1.5),
       maxDeduction: 1.5,
-      tip: swayImpact > 0.1 ? "Head lunges toward the target at impact. Keep the head behind the ball through the strike." : "Head hangs well behind at impact; that is fine for driver, less so for irons.",
+      tip: swayImpact > club.headAtImpact[1] ? "Head lunges toward the target at impact. Keep the head behind the ball through the strike." : "Head hangs further behind at impact than this club needs; usually a sign of hanging back on the trail side.",
       positions: ["P1", "P4"],
     });
 
@@ -122,10 +123,10 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       label: "Spine tilt at address",
       value: r1(tilt),
       unit: "° away from target",
-      target: "3 to 15°",
-      deduction: deduct(tilt, { lo: 3, hi: 15, tol: 12 }, 1),
+      target: `${club.spineTilt[0]} to ${club.spineTilt[1]}°`,
+      deduction: deduct(tilt, { lo: club.spineTilt[0], hi: club.spineTilt[1], tol: 12 }, 1),
       maxDeduction: 1,
-      tip: tilt < 3 ? "Upper body is centred or leaning toward the target at address. Bump the lead hip slightly toward the target so the spine tilts away." : "Too much tilt away from the target at address for an iron.",
+      tip: tilt < club.spineTilt[0] ? "Not enough spine tilt away from the target at address for this club. Bump the lead hip slightly toward the target so the upper body settles behind the ball." : `Too much tilt away from the target at address for a ${club.label.toLowerCase()}.`,
       positions: ["P1"],
     });
 
@@ -152,10 +153,10 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       label: "Spine angle at address",
       value: r1(spineP1),
       unit: "° from vertical",
-      target: "28 to 45°",
-      deduction: deduct(spineP1, { lo: 28, hi: 45, tol: 15 }, 1.5),
+      target: `${club.posture[0]} to ${club.posture[1]}°`,
+      deduction: deduct(spineP1, { lo: club.posture[0], hi: club.posture[1], tol: 15 }, 1.5),
       maxDeduction: 1.5,
-      tip: spineP1 < 28 ? "Standing too tall at address. Hinge more from the hips, keep the back flat." : "Bent over too much. Stand a little taller and let the arms hang.",
+      tip: spineP1 < club.posture[0] ? "Standing too tall at address. Hinge more from the hips, keep the back flat." : "Bent over too much. Stand a little taller and let the arms hang.",
       positions: ["P1"],
     });
 
@@ -179,8 +180,8 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       label: "Hip movement toward ball at impact",
       value: r1(ee * 100),
       unit: "% torso length",
-      target: "-10 to 12%",
-      deduction: deduct(ee, { lo: -0.1, hi: 0.12, tol: 0.25 }, 2),
+      target: `${club.earlyExtension[0] * 100} to ${club.earlyExtension[1] * 100}%`,
+      deduction: deduct(ee, { lo: club.earlyExtension[0], hi: club.earlyExtension[1], tol: 0.25 }, 2),
       maxDeduction: 2,
       tip: "Early extension: the hips thrust toward the ball in the downswing. Keep the trail glute back against an imaginary wall through impact.",
       positions: ["P1", "P4"],
