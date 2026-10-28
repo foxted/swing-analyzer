@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Overlay from "./Overlay";
+import Overlay, { TracerState } from "./Overlay";
 import Timeline, { Rate } from "./Timeline";
 import ScorePanel from "./ScorePanel";
 import { extractFrames, ModelSize } from "@/lib/pose";
@@ -9,6 +9,9 @@ import { detectPositions, detectView } from "@/lib/positions";
 import { analyse } from "@/lib/metrics";
 import { CameraView, Frame, Handedness, PositionKey, Positions } from "@/lib/types";
 import { CLUB_KEYS, CLUBS, ClubType } from "@/lib/clubs";
+import { BallMark, MIN_MARKS, estimateScale, fitTrajectory, groundLine, refineMark } from "@/lib/tracer";
+import { canExport, downloadBlob, exportVideo } from "@/lib/export";
+import { drawOverlay } from "@/lib/overlay-draw";
 
 type Stage = "idle" | "loading-model" | "processing" | "ready";
 
@@ -33,7 +36,15 @@ export default function Analyzer() {
   const [rate, setRate] = useState<Rate>(1);
   const [loop, setLoop] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
-  const [show, setShow] = useState({ skeleton: true, lines: true, ghost: false });
+  const [show, setShow] = useState({ skeleton: true, lines: true, ghost: false, tracer: true });
+  const [marks, setMarks] = useState<BallMark[]>([]);
+  const [marking, setMarking] = useState(false);
+  /** User-dragged horizon (image y, 0..1) for DTL clips; null = use the estimate. */
+  const [horizonOverride, setHorizonOverride] = useState<number | null>(null);
+  const horizonDrag = useRef<{ pointerId: number; moved: boolean } | null>(null);
+  const [exporting, setExporting] = useState<{ fraction: number } | null>(null);
+  const exportAbort = useRef<AbortController | null>(null);
+  const exportLock = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -47,6 +58,29 @@ export default function Analyzer() {
     [frames, positions, view, hand, club]
   );
 
+  const address = positions ? frames[positions.P1] : undefined;
+
+  // Image-height units per metre at the ball's depth, from the golfer's size at address.
+  const scale = useMemo(() => estimateScale(address), [address]);
+
+  // Horizon (camera eye level) for DTL: it tells the fit where the ground is at the ball's depth, so the
+  // path can end at the landing. Not observable from early-flight marks, so it is a draggable line with a
+  // default that assumes the camera sits 0.5 m above the ground.
+  const horizon = useMemo(() => {
+    if (view !== "dtl") return undefined;
+    if (horizonOverride !== null) return horizonOverride;
+    const rest = positions ? marks.find((m) => m.frame <= positions.P4) : undefined;
+    const ground = rest?.y ?? groundLine(address);
+    if (ground === undefined || scale === undefined) return undefined;
+    return Math.min(0.95, Math.max(0.05, ground - scale * 0.5));
+  }, [view, horizonOverride, positions, marks, address, scale]);
+
+  // Ball flight fitted to the marks, anchored at impact.
+  const trajectory = useMemo(
+    () => (positions ? fitTrajectory(marks, positions.P4, fps, { view, horizon, scale }) : null),
+    [marks, positions, fps, view, horizon, scale]
+  );
+
   const onFile = (file: File) => {
     abortRef.current?.abort();
     if (src) URL.revokeObjectURL(src);
@@ -54,6 +88,9 @@ export default function Analyzer() {
     setFileName(file.name);
     setFrames([]);
     setPositions(null);
+    setMarks([]);
+    setMarking(false);
+    setHorizonOverride(null);
     setCurrent(0);
     setStage("idle");
     setError(null);
@@ -130,7 +167,7 @@ export default function Analyzer() {
   // Keyboard: arrows step frames (shift = 5), space toggles play, 1-6 jump to P1-P6.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (stage !== "ready") return;
+      if (stage !== "ready" || exporting) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "SELECT") return;
       if (e.key === "ArrowLeft") seekTo(current - (e.shiftKey ? 5 : 1));
@@ -139,17 +176,110 @@ export default function Analyzer() {
         e.preventDefault();
         setPlaying((p) => !p);
       } else if (e.key === "l" || e.key === "L") setLoop((l) => !l);
+      else if (e.key === "b" || e.key === "B") setMarking((m) => !m);
+      else if (e.key === "Escape") setMarking(false);
       else if (/^[1-6]$/.test(e.key) && positions) seekTo(positions[`P${e.key}` as PositionKey]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [stage, current, positions, seekTo]);
+  }, [stage, current, positions, seekTo, exporting]);
 
   const setPosition = (k: PositionKey, frame: number) => setPositions((p) => (p ? { ...p, [k]: frame } : p));
 
+  // Export the clip with whatever helpers are switched on, at the current playback speed.
+  const runExport = async () => {
+    const v = videoRef.current;
+    if (!v || !positions || exporting || exportLock.current) return;
+    exportLock.current = true;
+    setPlaying(false);
+    setMarking(false);
+    const ac = new AbortController();
+    exportAbort.current = ac;
+    setExporting({ fraction: 0 });
+    setError(null);
+    const base = fileName.replace(/\.[^.]+$/, "") || "swing";
+    try {
+      const { blob, ext } = await exportVideo({
+        video: v,
+        fps,
+        rate,
+        frames,
+        signal: ac.signal,
+        drawOverlay: (ctx, index) =>
+          drawOverlay(ctx, {
+            width: dims.w,
+            height: dims.h,
+            frame: frames[index],
+            address: frames[positions.P1],
+            view,
+            hand,
+            club: CLUBS[club],
+            show,
+            tracer: { traj: trajectory, marks, t: (index - positions.P4) / fps, showMarks: false },
+          }),
+        onProgress: (fraction, index) => {
+          setExporting({ fraction });
+          setCurrent(index);
+        },
+      });
+      downloadBlob(blob, `${base}_analysed${rate !== 1 ? `_${rate}x` : ""}.${ext}`);
+    } catch (e) {
+      if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(null);
+      exportAbort.current = null;
+      exportLock.current = false;
+    }
+  };
+
+  const HORIZON_GRAB_PX = 12;
+  const nearHorizon = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!marking || view !== "dtl" || horizon === undefined) return false;
+    const r = e.currentTarget.getBoundingClientRect();
+    return Math.abs(e.clientY - (r.top + horizon * r.height)) <= HORIZON_GRAB_PX;
+  };
+
+  // Pointer down near the horizon line starts a drag; everything else is a click that places
+  // (or replaces) the ball mark for the current frame.
+  const onVideoPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!marking || stage !== "ready" || e.button !== 0) return;
+    if (nearHorizon(e)) {
+      horizonDrag.current = { pointerId: e.pointerId, moved: false };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
+  };
+  const onVideoPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = horizonDrag.current;
+    if (d && d.pointerId === e.pointerId) {
+      d.moved = true;
+      const r = e.currentTarget.getBoundingClientRect();
+      setHorizonOverride(Math.min(0.95, Math.max(0.05, (e.clientY - r.top) / r.height)));
+      return;
+    }
+    if (marking && view === "dtl") e.currentTarget.style.cursor = nearHorizon(e) ? "ns-resize" : "";
+  };
+  const onVideoPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = horizonDrag.current;
+    if (d && d.pointerId === e.pointerId) {
+      horizonDrag.current = null;
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      return; // a grab of the horizon never places a mark, even without movement
+    }
+    const v = videoRef.current;
+    if (!marking || stage !== "ready" || !v || e.button !== 0) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const raw = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+    const p = e.shiftKey ? raw : refineMark(v, raw.x, raw.y);
+    setMarks((ms) => [...ms.filter((m) => m.frame !== current), { frame: current, ...p }].sort((a, b) => a.frame - b.frame));
+  };
+
   const frame = frames[current];
-  const address = positions ? frames[positions.P1] : undefined;
   const busy = stage === "processing" || stage === "loading-model";
+  const tracer: TracerState | undefined = positions
+    ? { traj: trajectory, marks, t: (current - positions.P4) / fps, showMarks: marking, horizon }
+    : undefined;
+  const landingFrame = trajectory?.tLand != null && positions ? Math.round(positions.P4 + trajectory.tLand * fps) : null;
 
   return (
     <div className="flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
@@ -243,8 +373,11 @@ export default function Analyzer() {
           )}
           {src && (
             <div
-              className="relative mx-auto max-h-[72vh] max-w-full overflow-hidden rounded-xl bg-black lg:min-h-0 lg:max-h-none lg:flex-1"
+              className={`relative mx-auto max-h-[72vh] max-w-full overflow-hidden rounded-xl bg-black lg:min-h-0 lg:max-h-none lg:flex-1 ${marking ? "cursor-crosshair ring-2 ring-warn" : ""}`}
               style={{ aspectRatio: dims.w && dims.h ? `${dims.w} / ${dims.h}` : "9 / 16" }}
+              onPointerDown={onVideoPointerDown}
+              onPointerMove={onVideoPointerMove}
+              onPointerUp={onVideoPointerUp}
             >
               <video
                 ref={videoRef}
@@ -261,7 +394,7 @@ export default function Analyzer() {
                 }}
               />
               {dims.w > 0 && (
-                <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} club={CLUBS[club]} show={show} />
+                <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} club={CLUBS[club]} show={show} tracer={tracer} />
               )}
               {stage === "processing" && (
                 <div className="absolute inset-x-0 bottom-0 h-1 bg-white/15">
@@ -273,14 +406,97 @@ export default function Analyzer() {
           {stage === "ready" && positions && (
             <>
               <div className="flex shrink-0 items-center gap-4 text-xs text-muted">
-                {(["skeleton", "lines", "ghost"] as const).map((k) => (
+                {(["skeleton", "lines", "ghost", "tracer"] as const).map((k) => (
                   <label key={k} className="flex items-center gap-1.5">
                     <input type="checkbox" checked={show[k]} onChange={(e) => setShow({ ...show, [k]: e.target.checked })} />
-                    {k === "ghost" ? "address ghost" : k === "lines" ? "reference lines" : "skeleton"}
+                    {k === "ghost" ? "address ghost" : k === "lines" ? "reference lines" : k === "tracer" ? "ball tracer" : "skeleton"}
                   </label>
                 ))}
-                {frame && !frame.lm && <span className="ml-auto text-warn">no pose detected on this frame</span>}
+                <span className="mx-1 h-4 w-px bg-line" />
+                <button
+                  className={`rounded-md border px-2 py-0.5 ${marking ? "border-warn text-warn" : "border-line hover:border-muted"}`}
+                  onClick={() => setMarking((m) => !m)}
+                  aria-pressed={marking}
+                  disabled={!!exporting}
+                  title="Mark the ball on the current frame by clicking it (B). Shift-click to skip the snap."
+                >
+                  {marking ? "marking ball… (esc)" : "mark ball (B)"}
+                </button>
+                {frame && !frame.lm && <span className="text-warn">no pose detected on this frame</span>}
+                <span className="ml-auto flex items-center gap-2">
+                  {exporting ? (
+                    <>
+                      <span className="tabular-nums">exporting {Math.round(exporting.fraction * 100)}% · keep this tab visible</span>
+                      <button className="rounded-md border border-line px-2 py-0.5 hover:border-muted" onClick={() => exportAbort.current?.abort()}>
+                        cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="rounded-md border border-line px-2 py-0.5 hover:border-muted disabled:opacity-50"
+                      onClick={runExport}
+                      disabled={!canExport()}
+                      title={canExport() ? `Download the clip at ${rate}x with the helpers that are switched on` : "This browser cannot record video"}
+                    >
+                      export video{rate !== 1 ? ` (${rate}x)` : ""}
+                    </button>
+                  )}
+                </span>
               </div>
+              {(marks.length > 0 || marking) && (
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5 text-xs text-muted">
+                  <span>
+                    ball marks
+                    {marks.length > 0 && marks.length < MIN_MARKS && ` (need ${MIN_MARKS})`}
+                    {trajectory && ` · fit ±${(trajectory.rms * dims.h).toFixed(1)}px`}
+                    {landingFrame !== null && ` · lands @ #${landingFrame}`}
+                    {marks.length ? ":" : ": none yet"}
+                  </span>
+                  {marks.map((m) => {
+                    const here = m.frame === current;
+                    return (
+                      <span key={m.frame} className={`inline-flex items-center overflow-hidden rounded-md border ${here ? "border-warn text-warn" : "border-line"}`}>
+                        <button className="px-1.5 py-0.5 tabular-nums hover:bg-panel-2" onClick={() => seekTo(m.frame)} title={`Jump to frame ${m.frame}`}>
+                          #{m.frame}
+                          {m.frame <= (positions?.P4 ?? 0) ? " (ball at rest)" : ""}
+                        </button>
+                        <button
+                          className="border-l border-line px-1.5 py-0.5 hover:bg-panel-2 hover:text-bad"
+                          onClick={() => setMarks((ms) => ms.filter((x) => x.frame !== m.frame))}
+                          title={`Delete mark #${m.frame}`}
+                          aria-label={`Delete mark ${m.frame}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                  {marks.length > 0 && (
+                    <button className="rounded-md border border-line px-2 py-0.5 hover:border-muted" onClick={() => setMarks([])}>
+                      clear all
+                    </button>
+                  )}
+                  {horizonOverride !== null && (
+                    <button
+                      className="rounded-md border border-line px-2 py-0.5 hover:border-muted"
+                      onClick={() => setHorizonOverride(null)}
+                      title="Put the horizon back at the estimated camera eye level"
+                    >
+                      reset horizon
+                    </button>
+                  )}
+                </div>
+              )}
+              {marking && (
+                <p className="shrink-0 text-xs text-muted">
+                  Click the ball. Mark it at address (or impact), then on {MIN_MARKS - 1}+ frames in flight, spread as far apart as you
+                  can; three marks are enough, more make the fit tighter. The dashed line is the fitted path (fainter where it is
+                  extrapolated) and the white ring is where the fit expects the ball on this frame: if the ring is off the ball, add
+                  a mark here or delete a bad one. Re-click a frame to move its mark.
+                  {view === "dtl" &&
+                    " On a down-the-line clip, drag the blue dashed line to the camera's eye level (for a phone near the ground that is about the far end of the range): it tells the fit where the ground is, so the path ends at the landing."}
+                </p>
+              )}
               <Timeline
                 total={frames.length}
                 current={current}

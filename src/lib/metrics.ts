@@ -51,13 +51,13 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
   const tempo = back / down;
   metrics.push({
     id: "tempo",
-    label: "Tempo (backswing : downswing)",
+    label: "Tempo",
     value: r1(tempo),
-    unit: ": 1",
-    target: "2.5 to 3.5 : 1",
+    unit: "to 1",
+    target: "2.5 to 3.5",
     deduction: deduct(tempo, { lo: 2.5, hi: 3.5, tol: 1.5 }, 1),
     maxDeduction: 1,
-    tip: tempo < 2.5 ? "Backswing is rushed relative to the downswing. Try a slower takeaway." : "Downswing is slow relative to the backswing. Commit through the ball.",
+    tip: tempo < 2.5 ? "Backswing is quick. Count \"1, 2, 3\" going back and \"1\" coming down." : "Downswing is lazy. Finish the backswing, then swing through with commitment.",
     positions: ["P1", "P3", "P4"],
   });
 
@@ -74,13 +74,13 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     const straighten = Math.max(0, kneeSeries[peak] - kneeP1);
     metrics.push({
       id: "trailKnee",
-      label: "Trail knee lock in backswing",
+      label: "Trail knee in backswing",
       value: r1(straighten),
-      unit: `° straighter than address (${r1(kneeP1)}° to ${r1(kneeSeries[peak])}°, 180 = locked)`,
+      unit: "° straighter than address",
       target: "under 15°",
       deduction: deduct(straighten, { lo: -Infinity, hi: 15, tol: 15 }, 1.5),
       maxDeduction: 1.5,
-      tip: "Trail knee straightens going back and locks. Keep the flex you set at address all the way to the top: feel the trail knee stay bent and pointing at the ball while the hips turn behind you.",
+      tip: `Trail knee straightens going back (${r1(kneeP1)}° to ${r1(kneeSeries[peak])}°). Keep the flex you set at address all the way to the top, knee pointing at the ball.`,
       positions: ["P1", "P2", "P3"],
       frame: peak,
     });
@@ -92,24 +92,24 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     const swayImpact = ((p4[LM.nose].x - p1[LM.nose].x) * dir) / SW; // + = toward target
     metrics.push({
       id: "headSwayBack",
-      label: "Head sway in backswing",
+      label: "Head sway going back",
       value: r1(swayTop * 100),
-      unit: "% shoulder width (away from target)",
+      unit: "% of shoulder width",
       target: "-10 to 25%",
       deduction: deduct(swayTop, { lo: -0.1, hi: 0.25, tol: 0.3 }, 2),
       maxDeduction: 2,
-      tip: swayTop > 0.25 ? "Head drifts off the ball going back. Feel the trail hip load without sliding." : "Head moves toward the target going back (reverse pivot). Let the weight settle into the trail side.",
+      tip: swayTop > 0.25 ? "Head slides away from the target going back. Turn around your trail hip instead of sliding onto it." : "Head moves toward the target going back. Let your weight settle into the trail foot at the top.",
       positions: ["P1", "P3"],
     });
     metrics.push({
       id: "headSwayImpact",
-      label: "Head position at impact",
+      label: "Head at impact",
       value: r1(swayImpact * 100),
-      unit: "% shoulder width (toward target)",
+      unit: "% of shoulder width",
       target: `${club.headAtImpact[0] * 100} to ${club.headAtImpact[1] * 100}%`,
       deduction: deduct(swayImpact, { lo: club.headAtImpact[0], hi: club.headAtImpact[1], tol: 0.3 }, 1.5),
       maxDeduction: 1.5,
-      tip: swayImpact > club.headAtImpact[1] ? "Head lunges toward the target at impact. Keep the head behind the ball through the strike." : "Head hangs further behind at impact than this club needs; usually a sign of hanging back on the trail side.",
+      tip: swayImpact > club.headAtImpact[1] ? "Head lunges past the ball at impact. Keep your head behind the ball until the club has struck it." : "Head stays well behind at impact. Push your weight onto the lead foot as you start down.",
       positions: ["P1", "P4"],
     });
 
@@ -123,7 +123,7 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       target: "155 to 180°",
       deduction: deduct(leadArm, { lo: 155, hi: 181, tol: 30 }, 1.5),
       maxDeduction: 1.5,
-      tip: "Lead arm collapses at the top. Width in the backswing comes from the trail arm folding, not the lead arm.",
+      tip: "Lead arm bends at the top. Keep it long and let the trail elbow fold instead.",
       positions: ["P3"],
     });
 
@@ -131,13 +131,13 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     const hipLead = ((p4[L.hip].x - p4[L.ankle].x) * dir) / SW;
     metrics.push({
       id: "hipImpact",
-      label: "Lead hip vs lead ankle at impact",
+      label: "Hips at impact",
       value: r1(hipLead * 100),
-      unit: "% shoulder width (ahead of ankle)",
+      unit: "% ahead of lead ankle",
       target: "0 to 35%",
       deduction: deduct(hipLead, { lo: 0, hi: 0.35, tol: 0.3 }, 1.5),
       maxDeduction: 1.5,
-      tip: hipLead < 0 ? "Hips hang back at impact. Start the downswing by shifting pressure into the lead foot." : "Hips slide too far past the lead foot. Rotate rather than slide.",
+      tip: hipLead < 0 ? "Hips hang back at impact. Start the downswing by pushing into the lead foot." : "Hips slide past the lead foot. Turn the lead hip back behind you instead of sliding.",
       positions: ["P4"],
     });
 
@@ -151,7 +151,7 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       target: `${club.spineTilt[0]} to ${club.spineTilt[1]}°`,
       deduction: deduct(tilt, { lo: club.spineTilt[0], hi: club.spineTilt[1], tol: 12 }, 1),
       maxDeduction: 1,
-      tip: tilt < club.spineTilt[0] ? "Not enough spine tilt away from the target at address for this club. Bump the lead hip slightly toward the target so the upper body settles behind the ball." : `Too much tilt away from the target at address for a ${club.label.toLowerCase()}.`,
+      tip: tilt < club.spineTilt[0] ? "Add a little tilt away from the target at address: bump the lead hip toward the target so the trail shoulder sits lower." : `Too much tilt away from the target for a ${club.label.toLowerCase()}. Level the shoulders a touch at address.`,
       positions: ["P1"],
     });
 
@@ -160,13 +160,13 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       const finishHips = ((hipMid(p6).x - p6[L.ankle].x) * dir) / SW;
       metrics.push({
         id: "finish",
-        label: "Hips over lead foot at finish",
+        label: "Balance at finish",
         value: r1(finishHips * 100),
-        unit: "% shoulder width (ahead of lead ankle)",
+        unit: "% of shoulder width",
         target: "-25 to 15%",
         deduction: deduct(finishHips, { lo: -0.25, hi: 0.15, tol: 0.3 }, 1),
         maxDeduction: 1,
-        tip: "Weight is not fully on the lead side at the finish. Hold the finish with the trail toe down and chest at the target.",
+        tip: "Weight isn't fully on the lead foot at the finish. Hold your finish for three seconds, trail heel up, chest at the target.",
         positions: ["P6"],
       });
     }
@@ -175,13 +175,13 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     const spineP1 = Math.abs(tiltFromVertical(hipMid(p1), shoulderMid(p1)));
     metrics.push({
       id: "posture",
-      label: "Spine angle at address",
+      label: "Posture at address",
       value: r1(spineP1),
       unit: "° from vertical",
       target: `${club.posture[0]} to ${club.posture[1]}°`,
       deduction: deduct(spineP1, { lo: club.posture[0], hi: club.posture[1], tol: 15 }, 1.5),
       maxDeduction: 1.5,
-      tip: spineP1 < club.posture[0] ? "Standing too tall at address. Hinge more from the hips, keep the back flat." : "Bent over too much. Stand a little taller and let the arms hang.",
+      tip: spineP1 < club.posture[0] ? "Standing too tall. Push your hips back and bow from the hips, back flat." : "Bent over too far. Stand a little taller and let the arms hang under the shoulders.",
       positions: ["P1"],
     });
 
@@ -190,11 +190,11 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       id: "kneeFlex",
       label: "Knee flex at address",
       value: r1(knee),
-      unit: "° (180 = locked)",
+      unit: "° (180 = straight)",
       target: "150 to 172°",
       deduction: deduct(knee, { lo: 150, hi: 172, tol: 15 }, 1),
       maxDeduction: 1,
-      tip: knee > 172 ? "Knees are locked. Soften them a touch." : "Too much knee bend; it usually comes with a rounded back.",
+      tip: knee > 172 ? "Knees are locked at address. Soften them, like you're about to sit on a tall stool." : "Knees are too bent at address. Stand slightly taller and bend from the hips instead.",
       positions: ["P1"],
     });
 
@@ -202,13 +202,13 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     const ee = ((hipMid(p4).x - hipMid(p1).x) * dir) / T; // + = toward ball
     metrics.push({
       id: "earlyExtension",
-      label: "Hip movement toward ball at impact",
+      label: "Early extension",
       value: r1(ee * 100),
-      unit: "% torso length",
+      unit: "% of torso toward the ball",
       target: `${club.earlyExtension[0] * 100} to ${club.earlyExtension[1] * 100}%`,
       deduction: deduct(ee, { lo: club.earlyExtension[0], hi: club.earlyExtension[1], tol: 0.25 }, 2),
       maxDeduction: 2,
-      tip: "Early extension: the hips thrust toward the ball in the downswing. Keep the trail glute back against an imaginary wall through impact.",
+      tip: "Hips move toward the ball coming down. Keep your trail glute back, as if against a wall, through impact.",
       positions: ["P1", "P4"],
     });
 
@@ -216,26 +216,26 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     const spineDelta = spineP4 - spineP1;
     metrics.push({
       id: "spineMaintain",
-      label: "Spine angle change at impact",
+      label: "Posture at impact",
       value: r1(spineDelta),
-      unit: "° (negative = stood up)",
+      unit: "° change (negative = stood up)",
       target: "-8 to 10°",
       deduction: deduct(spineDelta, { lo: -8, hi: 10, tol: 15 }, 1.5),
       maxDeduction: 1.5,
-      tip: spineDelta < -8 ? "Standing up out of posture into impact. Keep the chest down over the ball." : "Dipping into impact. Maintain the address height.",
+      tip: spineDelta < -8 ? "You stand up out of posture into impact. Keep your chest down over the ball until after the strike." : "You dip into impact. Keep your head height steady from address to impact.",
       positions: ["P1", "P4"],
     });
 
     const headDrop = (p4[LM.nose].y - p1[LM.nose].y) / T; // + = lower in image
     metrics.push({
       id: "headHeight",
-      label: "Head height change at impact",
+      label: "Head height at impact",
       value: r1(headDrop * 100),
-      unit: "% torso length (positive = lower)",
+      unit: "% of torso (positive = lower)",
       target: "-10 to 15%",
       deduction: deduct(headDrop, { lo: -0.1, hi: 0.15, tol: 0.25 }, 1),
       maxDeduction: 1,
-      tip: headDrop < -0.1 ? "Head rises into impact. Usually a symptom of early extension." : "Head drops a lot into impact.",
+      tip: headDrop < -0.1 ? "Head rises into impact. Keep the chest over the ball through the strike." : "Head drops a lot into impact. Stay at your address height.",
       positions: ["P1", "P4"],
     });
 
@@ -245,13 +245,13 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       const handsP2 = ((hands(p2).x - toes) * dir) / T; // + = outside toe line (toward ball)
       metrics.push({
         id: "p2Hands",
-        label: "Hands vs toe line at P2",
+        label: "Takeaway hands",
         value: r1(handsP2 * 100),
-        unit: "% torso length (positive = outside toes)",
+        unit: "% of torso outside the toes",
         target: "-20 to 20%",
         deduction: deduct(handsP2, { lo: -0.2, hi: 0.2, tol: 0.3 }, 1),
         maxDeduction: 1,
-        tip: handsP2 > 0.2 ? "Hands work outside the line in the takeaway; club tends to get steep." : "Hands pull inside early in the takeaway; club tends to get flat and behind.",
+        tip: handsP2 > 0.2 ? "Hands move out away from you in the takeaway. Keep them in front of your chest as the chest turns." : "Hands pull in behind you in the takeaway. Let the chest turn move the hands and keep them in front of you.",
         positions: ["P2"],
       });
     }
@@ -266,7 +266,7 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       target: "150 to 180°",
       deduction: deduct(leadArm, { lo: 150, hi: 181, tol: 30 }, 1),
       maxDeduction: 1,
-      tip: "Lead arm collapses at the top.",
+      tip: "Lead arm bends at the top. Keep it long and let the trail elbow fold instead.",
       positions: ["P3"],
     });
   }
