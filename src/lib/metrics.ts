@@ -10,7 +10,9 @@ import { ClubProfile } from "@/lib/clubs";
  */
 
 /** Degrees of knee flex (short of fully straight) below which a knee counts as locked. */
-export const KNEE_LOCKED_FLEX = 5;
+export const KNEE_LOCKED_FLEX = 2;
+/** Flex the trail knee should keep at its straightest point in the backswing. */
+export const KNEE_TOP_MIN_FLEX = 4;
 
 type Range = { lo: number; hi: number; tol: number }; // tol = how far past the edge costs the full deduction
 
@@ -80,7 +82,7 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       label: "Knee flex at address",
       value: r1(flex),
       unit: `° of flex (${refNote})`,
-      target: "5 to 25°",
+      target: `${KNEE_LOCKED_FLEX} to 25°`,
       deduction: deduct(flex, { lo: KNEE_LOCKED_FLEX, hi: 25, tol: 10 }, 1),
       maxDeduction: 1,
       tip: flex < KNEE_LOCKED_FLEX ? "Knees are locked at address. Soften them, like you're about to sit on a tall stool." : "Knees are too bent at address. Stand slightly taller and bend from the hips instead.",
@@ -107,7 +109,7 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     const tip =
       flexAddr < KNEE_LOCKED_FLEX
         ? `Trail knee is already locked at address and stays that way to the top. Set some flex at address and keep it all the way back, knee pointing at the ball.`
-        : flexTop < KNEE_LOCKED_FLEX
+        : flexTop < KNEE_TOP_MIN_FLEX
           ? `Trail knee locks going back (${r1(flexAddr)}° of flex at address, ${r1(flexTop)}° at the top). Keep the flex you set at address all the way to the top, knee pointing at the ball.`
           : `Trail knee straightens going back (${r1(flexAddr)}° of flex at address, ${r1(flexTop)}° at the top). Keep the flex you set at address all the way to the top, knee pointing at the ball.`;
     metrics.push({
@@ -115,8 +117,8 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       label: "Trail knee in backswing",
       value: r1(flexTop),
       unit: `° of flex left at its straightest (address ${r1(flexAddr)}°, ${refNote})`,
-      target: `at least ${KNEE_LOCKED_FLEX}°, within 8° of address`,
-      deduction: Math.max(deduct(flexTop, { lo: KNEE_LOCKED_FLEX, hi: Infinity, tol: 5 }, 1.5), deduct(straighten, { lo: -Infinity, hi: 8, tol: 12 }, 1.5)),
+      target: `at least ${KNEE_TOP_MIN_FLEX}°, within 8° of address`,
+      deduction: Math.max(deduct(flexTop, { lo: KNEE_TOP_MIN_FLEX, hi: Infinity, tol: 4 }, 1.5), deduct(straighten, { lo: -Infinity, hi: 8, tol: 12 }, 1.5)),
       maxDeduction: 1.5,
       tip,
       positions: ["P1", "P2", "P3"],

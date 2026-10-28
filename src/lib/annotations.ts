@@ -141,7 +141,7 @@ function drawGeometry(env: Env, m: Metric, id: string, live: (id: MeasureId) => 
       const half = env.height * 0.08;
       line(env, { x: ref.x, y: ref.y - half }, { x: ref.x, y: ref.y + half }, COLOR.ref, env.u * 0.6, true);
       arrow(env, { x: ref.x, y: nose.y }, nose, c);
-      label(env, `${pct(live(id))} head ${id === "headSwayBack" ? "away" : "toward target"}`, nose.x, nose.y - env.font * 1.6, c);
+      label(env, `head ${pct(live(id))} ${id === "headSwayBack" ? "away" : "toward target"} since address`, nose.x, nose.y - env.font * 1.6, c);
       return;
     }
     case "hipImpact":
@@ -158,7 +158,7 @@ function drawGeometry(env: Env, m: Metric, id: string, live: (id: MeasureId) => 
       const hip = px(hipMid(lm));
       line(env, { x: ref.x, y: 0 }, { x: ref.x, y: env.height }, COLOR.ref, env.u * 0.6, true);
       arrow(env, { x: ref.x, y: hip.y }, hip, c);
-      label(env, `${pct(live(id))} toward ball`, hip.x + dir * env.font, hip.y - env.font * 1.6, c);
+      label(env, `hips ${signed(live(id))}% toward ball since address`, hip.x + dir * env.font, hip.y - env.font * 1.6, c);
       return;
     }
     case "headHeight": {
@@ -167,7 +167,7 @@ function drawGeometry(env: Env, m: Metric, id: string, live: (id: MeasureId) => 
       const half = env.width * 0.08;
       line(env, { x: ref.x - half, y: ref.y }, { x: ref.x + half, y: ref.y }, COLOR.ref, env.u * 0.6, true);
       arrow(env, { x: nose.x, y: ref.y }, nose, c);
-      label(env, `${signed(live(id))}% head height`, nose.x, Math.min(ref.y, nose.y) - env.font * 1.6, c);
+      label(env, `head ${signed(live(id))}% lower since address`, nose.x, Math.min(ref.y, nose.y) - env.font * 1.6, c);
       return;
     }
     case "p2Hands": {
