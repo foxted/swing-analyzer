@@ -32,6 +32,12 @@ Click `mark ball` (or press `b`), step to a frame where the ball is visible and 
 
 The path ends where the ball meets the ground, not where it leaves the frame. Face-on the ground is at the ball's own height. Down the line the ground recedes with the ball, and where it sits at a given depth depends on the camera's eye level, which the marks cannot tell: in marking mode a blue dashed line shows it, defaulting to a camera 0.5 m above the ground. Drag it to the camera's eye level (for a phone near the ground, roughly the far end of the range); `reset horizon` returns to the estimate. Sidespin curve is not modelled, and the extrapolated part can drift by a few percent of the frame per second of flight beyond the marks.
 
+## Home and saved clips
+
+The app opens on a home screen: a drop zone, and once anything has been analysed, cards for the last five swings with an impact-frame thumbnail, score, view, club and age. Opening a card brings the analysis back exactly as it was left: pose frames, P-positions, ball marks, horizon, shown checks and settings, with no re-processing. The title or `← swings` returns home. Everything is kept in the browser's IndexedDB, including a copy of the video when it is under 200 MB, so the original file is never touched after the picker and moving or deleting it cannot break anything. A card marked “needs file” has its analysis but not the bytes (too big, or evicted by the browser): opening it asks for the file, and picking the same one restores the clip and keeps the bytes from then on. Nothing leaves the machine. `src/lib/store.ts`, `src/components/Home.tsx`.
+
+The club type (wedge, iron, hybrid, wood, driver) drives the reference lines and target ranges; the text box next to it takes the actual club (“7-iron”), which is saved with the clip, shown on its card and used in the on-video captions.
+
 ## Export
 
 `export video` plays the clip through once at the selected speed and records it with whatever helpers are switched on (skeleton, reference lines, address ghost, ball tracer) burnt in, then downloads the file. The browser's MediaRecorder picks the container: MP4/H.264 where supported (Chrome, Safari), otherwise WebM. Pick 0.25x or 0.5x first for a slow-motion export; the file plays at that speed. `src/lib/export.ts` and `src/lib/overlay-draw.ts` (the same drawing code the on-screen overlay uses).

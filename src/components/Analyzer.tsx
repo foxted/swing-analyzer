@@ -12,6 +12,8 @@ import { CLUB_KEYS, CLUBS, ClubType } from "@/lib/clubs";
 import { BallMark, MIN_MARKS, estimateScale, fitTrajectory, groundLine, refineMark } from "@/lib/tracer";
 import { canExport, downloadBlob, exportVideo } from "@/lib/export";
 import { drawOverlay } from "@/lib/overlay-draw";
+import { ClipMeta, ClipSettings, deleteClip, fileKey, listClips, loadClip, requestPersistence, saveClip } from "@/lib/store";
+import Home from "./Home";
 
 type Stage = "idle" | "loading-model" | "processing" | "ready";
 
@@ -26,6 +28,9 @@ export default function Analyzer() {
   const [model, setModel] = useState<ModelSize>("full");
   const [hand, setHand] = useState<Handedness>("right");
   const [club, setClub] = useState<ClubType>("iron");
+  /** Free-text club name ("7-iron"); the type above still drives the reference lines and ranges. */
+  const [clubLabel, setClubLabel] = useState("");
+  const clubProfile = useMemo(() => (clubLabel.trim() ? { ...CLUBS[club], label: clubLabel.trim() } : CLUBS[club]), [club, clubLabel]);
   const [viewOverride, setViewOverride] = useState<CameraView | "auto">("auto");
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -49,6 +54,12 @@ export default function Analyzer() {
   const exportLock = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** Identity of the loaded clip (what the store keys on) and the file itself when we have it. */
+  const [fileInfo, setFileInfo] = useState<{ name: string; size: number; lastModified: number } | null>(null);
+  const fileRef = useRef<Blob | null>(null);
+  const [recent, setRecent] = useState<ClipMeta[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const restoring = useRef(false);
 
   const view: CameraView = useMemo(
     () => (viewOverride === "auto" ? (frames.length ? detectView(frames) : "dtl") : viewOverride),
@@ -56,8 +67,8 @@ export default function Analyzer() {
   );
 
   const analysis = useMemo(
-    () => (positions && frames.length ? analyse(frames, positions, view, hand, CLUBS[club]) : null),
-    [frames, positions, view, hand, club]
+    () => (positions && frames.length ? analyse(frames, positions, view, hand, clubProfile) : null),
+    [frames, positions, view, hand, clubProfile]
   );
 
   const address = positions ? frames[positions.P1] : undefined;
@@ -83,11 +94,24 @@ export default function Analyzer() {
     [marks, positions, fps, view, horizon, scale]
   );
 
-  const onFile = (file: File) => {
+  const settings = (): ClipSettings => ({ fps, model, hand, club, clubLabel, viewOverride, show, marks, horizonOverride, shownChecks });
+
+  const applySettings = (st: ClipSettings) => {
+    setFps(st.fps);
+    setModel(st.model);
+    setHand(st.hand);
+    setClub(st.club);
+    setClubLabel(st.clubLabel ?? "");
+    setViewOverride(st.viewOverride);
+    setShow(st.show);
+    setMarks(st.marks);
+    setHorizonOverride(st.horizonOverride);
+    setShownChecks(st.shownChecks);
+  };
+
+  const resetClipState = () => {
     abortRef.current?.abort();
     if (src) URL.revokeObjectURL(src);
-    setSrc(URL.createObjectURL(file));
-    setFileName(file.name);
     setFrames([]);
     setPositions(null);
     setMarks([]);
@@ -95,9 +119,111 @@ export default function Analyzer() {
     setHorizonOverride(null);
     setShownChecks([]);
     setCurrent(0);
+    setPlaying(false);
     setStage("idle");
     setError(null);
   };
+
+  const goHome = () => {
+    resetClipState();
+    setSrc(null);
+    setFileName("");
+    setFileInfo(null);
+    fileRef.current = null;
+    refreshRecent();
+  };
+
+  /** Put a saved clip on screen: its video (from the store or the picked file) plus its analysis. */
+  const restoreClip = (meta: ClipMeta, blob: Blob, analysis: { frames: Frame[]; positions: Positions } | null) => {
+    restoring.current = true;
+    resetClipState();
+    fileRef.current = blob;
+    setFileInfo({ name: meta.name, size: meta.size, lastModified: meta.lastModified });
+    setFileName(meta.name);
+    setSrc(URL.createObjectURL(blob));
+    applySettings(meta.settings);
+    if (analysis) {
+      setFrames(analysis.frames);
+      setPositions(analysis.positions);
+      setCurrent(analysis.positions.P1);
+      setStage("ready");
+    }
+    // Let the state settle before the save effect is allowed to write again.
+    setTimeout(() => (restoring.current = false), 0);
+  };
+
+  const onFile = async (file: File) => {
+    const info = { name: file.name, size: file.size, lastModified: file.lastModified };
+    const saved = await loadClip(fileKey(info));
+    if (saved?.analysis) {
+      // Same file as a saved clip: restore the analysis instead of re-processing, and keep the
+      // bytes this time so the next reload is silent.
+      restoreClip(saved.meta, file, saved.analysis);
+      if (!saved.meta.hasBlob) saveClip(info, saved.meta.settings, saved.meta.summary, undefined, file).then(refreshRecent);
+      return;
+    }
+    resetClipState();
+    fileRef.current = file;
+    setFileInfo(info);
+    setSrc(URL.createObjectURL(file));
+    setFileName(file.name);
+  };
+
+  const refreshRecent = () => listClips().then(setRecent);
+
+  /** Small JPEG of the video at `time`, for the home screen card. Restores the playhead after. */
+  const captureThumb = async (time: number): Promise<Blob | null> => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return null;
+    const was = v.currentTime;
+    try {
+      v.currentTime = time;
+      await new Promise<void>((r) => v.addEventListener("seeked", () => r(), { once: true }));
+      const w = 240;
+      const h = Math.round((v.videoHeight / v.videoWidth) * w);
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      c.getContext("2d")?.drawImage(v, 0, 0, w, h);
+      return await new Promise<Blob | null>((r) => c.toBlob(r, "image/jpeg", 0.8));
+    } catch {
+      return null;
+    } finally {
+      v.currentTime = was;
+    }
+  };
+
+  /** A card on the home screen: open it, or ask for the file when its bytes are not stored. */
+  const openRecent = async (clip: ClipMeta) => {
+    if (!clip.hasBlob) {
+      // Must stay inside the click gesture, so no await before this.
+      fileInputRef.current?.click();
+      return;
+    }
+    const saved = await loadClip(clip.key);
+    if (!saved?.blob) return refreshRecent();
+    restoreClip(saved.meta, saved.blob, saved.analysis);
+  };
+
+  // Persistence is best-effort, so nothing here can fail loudly.
+  useEffect(() => {
+    requestPersistence().then(refreshRecent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Save settings, marks and positions whenever they change on an analysed clip (debounced; the
+  // frames go with them so a manually corrected P-position survives a reload too).
+  useEffect(() => {
+    if (stage !== "ready" || !fileInfo || !positions || !frames.length || restoring.current) return;
+    const info = fileInfo;
+    const st = settings();
+    const summary = analysis ? { score: analysis.score, view: analysis.view } : { score: 0, view };
+    const id = window.setTimeout(() => {
+      saveClip(info, st, summary, { frames, positions }).then(refreshRecent);
+    }, 600);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, fileInfo, positions, frames, fps, model, hand, club, clubLabel, viewOverride, show, marks, horizonOverride, shownChecks, analysis, view]);
 
   const run = async () => {
     const v = videoRef.current;
@@ -125,6 +251,14 @@ export default function Analyzer() {
       setPositions(pos);
       setCurrent(pos.P1);
       setStage("ready");
+      if (fileInfo) {
+        const viewNow = viewOverride === "auto" ? detectView(fr) : viewOverride;
+        const score = analyse(fr, pos, viewNow, hand, clubProfile).score;
+        const thumb = await captureThumb(pos.P4 / fps);
+        await saveClip(fileInfo, { ...settings(), marks: [], horizonOverride: null, shownChecks: [] }, { score, view: viewNow, thumb }, { frames: fr, positions: pos }, fileRef.current);
+        refreshRecent();
+      }
+      v.currentTime = pos.P1 / fps;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStage("idle");
@@ -216,7 +350,7 @@ export default function Analyzer() {
             address: frames[positions.P1],
             view,
             hand,
-            club: CLUBS[club],
+            club: clubProfile,
             show,
             tracer: { traj: trajectory, marks, t: (index - positions.P4) / fps, showMarks: false },
             checks: checksFor(index),
@@ -293,12 +427,28 @@ export default function Analyzer() {
   return (
     <div className="flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
       <header className="flex shrink-0 flex-wrap items-center gap-4 border-b border-line px-5 py-3">
-        <h1 className="text-base font-semibold tracking-wide">Swing Analyzer</h1>
+        <button className="text-base font-semibold tracking-wide hover:text-accent" onClick={src ? goHome : undefined} title={src ? "Back to your swings" : undefined}>
+          Swing Analyzer
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="video/*"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) onFile(f);
+          }}
+        />
+        {src && (
         <div className="flex flex-wrap items-center gap-3">
-          <label className="max-w-64 cursor-pointer truncate rounded-md border border-dashed border-line bg-panel-2 px-3 py-1.5 text-sm">
-            <input type="file" accept="video/*" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+          <button className="rounded-md border border-line bg-panel-2 px-3 py-1.5 text-sm" onClick={goHome} disabled={busy}>
+            ← swings
+          </button>
+          <button className="max-w-64 truncate rounded-md border border-dashed border-line bg-panel-2 px-3 py-1.5 text-sm" onClick={() => fileInputRef.current?.click()} title="Choose a different clip">
             {fileName || "Choose a swing video"}
-          </label>
+          </button>
           <label className={labelCls}>
             fps
             <select className={selectCls} value={fps} onChange={(e) => setFps(Number(e.target.value))} disabled={busy}>
@@ -326,6 +476,14 @@ export default function Analyzer() {
                 </option>
               ))}
             </select>
+            <input
+              className={`${selectCls} w-24`}
+              value={clubLabel}
+              onChange={(e) => setClubLabel(e.target.value)}
+              placeholder="e.g. 7-iron"
+              maxLength={24}
+              title="Name the club you hit. The type on the left still sets the reference lines and target ranges."
+            />
           </label>
           <label className={labelCls}>
             hand
@@ -361,25 +519,21 @@ export default function Analyzer() {
             </button>
           )}
         </div>
+        )}
       </header>
 
       {error && <div className="mx-5 mt-3 shrink-0 rounded-md border border-bad bg-red-950 px-3 py-2 text-sm">{error}</div>}
-
+      {!src && (
+        <Home
+          recent={recent}
+          onFile={onFile}
+          onOpen={openRecent}
+          onForget={(c) => deleteClip(c.key).then(refreshRecent)}
+        />
+      )}
+      {src && (
       <main className={`grid flex-1 gap-4 p-5 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden ${stage === "ready" ? "lg:grid-cols-[minmax(0,1fr)_380px]" : "grid-cols-1"}`}>
         <section className="flex min-w-0 flex-col gap-3 lg:min-h-0">
-          {!src && (
-            <div
-              className="rounded-xl border-2 border-dashed border-line px-5 py-20 text-center text-muted"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const f = e.dataTransfer.files?.[0];
-                if (f) onFile(f);
-              }}
-            >
-              Drop a down-the-line or face-on swing video here
-            </div>
-          )}
           {src && (
             <div
               className={`relative mx-auto max-h-[72vh] max-w-full overflow-hidden rounded-xl bg-black lg:min-h-0 lg:max-h-none lg:flex-1 ${marking ? "cursor-crosshair ring-2 ring-warn" : ""}`}
@@ -398,12 +552,13 @@ export default function Analyzer() {
                 className="block h-full w-full object-contain"
                 onLoadedMetadata={(e) => {
                   const v = e.currentTarget;
+                  if (current > 0) v.currentTime = current / fps;
                   v.playbackRate = rate;
                   setDims({ w: v.videoWidth, h: v.videoHeight });
                 }}
               />
               {dims.w > 0 && (
-                <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} club={CLUBS[club]} show={show} tracer={tracer} checks={checks} />
+                <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} club={clubProfile} show={show} tracer={tracer} checks={checks} />
               )}
               {stage === "processing" && (
                 <div className="absolute inset-x-0 bottom-0 h-1 bg-white/15">
@@ -526,6 +681,7 @@ export default function Analyzer() {
           <ScorePanel analysis={analysis} onJump={(k) => positions && seekTo(positions[k])} onSeek={seekTo} shown={shownChecks} onShown={setShownChecks} />
         )}
       </main>
+      )}
     </div>
   );
 }
