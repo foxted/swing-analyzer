@@ -19,8 +19,8 @@ type Props = {
   onSetPosition: (k: PositionKey, frame: number) => void;
 };
 
-const btn = "rounded-md border border-line bg-panel-2 px-2.5 py-1.5 text-sm hover:border-muted";
-const toggle = (on: boolean) => `${btn} px-2 text-xs tabular-nums ${on ? "border-accent text-accent" : "text-muted"}`;
+const btn = "rounded-md border border-line bg-panel px-2.5 py-1.5 text-sm hover:border-line-strong";
+const toggle = (on: boolean) => `${btn} px-2 text-xs tabular-nums ${on ? "border-accent bg-accent-soft text-accent" : "text-muted"}`;
 
 export default function Timeline({ total, current, positions, playing, rate, loop, onSeek, onTogglePlay, onRate, onToggleLoop, onSetPosition }: Props) {
   const pct = (i: number) => `${(i / Math.max(1, total - 1)) * 100}%`;
@@ -73,7 +73,7 @@ export default function Timeline({ total, current, positions, playing, rate, loo
           return (
             <div key={k} className="flex flex-col gap-1">
               <button
-                className={`flex flex-col items-start gap-0.5 rounded-md border bg-panel-2 p-2 text-left leading-tight ${active ? "border-accent" : "border-line hover:border-muted"}`}
+                className={`flex flex-col items-start gap-0.5 rounded-md border p-2 text-left leading-tight ${active ? "border-accent bg-accent-soft" : "border-line bg-panel hover:border-line-strong"}`}
                 onClick={() => onSeek(positions[k])}
                 title={`Jump to ${POSITION_LABELS[k]} (${k.slice(1)})`}
               >
@@ -82,7 +82,7 @@ export default function Timeline({ total, current, positions, playing, rate, loo
                 <small className="text-[11px] tabular-nums text-warn">#{positions[k]}</small>
               </button>
               <button
-                className="rounded-md border border-line px-1.5 py-0.5 text-[11px] text-muted hover:border-muted"
+                className="rounded-md border border-line px-1.5 py-0.5 text-[11px] text-muted hover:border-line-strong"
                 onClick={() => onSetPosition(k, current)}
                 title={`Set ${k} to the current frame`}
               >

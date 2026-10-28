@@ -31,7 +31,8 @@ export default function Home({ recent, onFile, onOpen, onForget }: Props) {
       <section className={`flex flex-col items-center gap-4 text-center ${empty ? "py-16" : "py-4"}`}>
         {empty && (
           <>
-            <h2 className="text-3xl font-semibold tracking-tight">Analyse your swing</h2>
+            <img src="/logo.svg" alt="" className="size-14" />
+            <h2 className="text-3xl font-medium tracking-tight">Analyse your swing</h2>
             <p className="max-w-md text-muted">
               Drop a down-the-line or face-on clip. Posture, tempo, sway, knee flex and more, scored on the video, with a ball tracer you
               can export. Everything stays on this device.
@@ -40,7 +41,7 @@ export default function Home({ recent, onFile, onOpen, onForget }: Props) {
         )}
         <label
           className={`flex w-full max-w-xl cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed px-6 py-12 transition-colors ${
-            over ? "border-accent bg-panel-2" : "border-line hover:border-muted"
+            over ? "border-accent bg-accent-soft" : "border-line-strong bg-panel hover:border-accent"
           }`}
           onDragOver={(e) => {
             e.preventDefault();
@@ -71,7 +72,7 @@ export default function Home({ recent, onFile, onOpen, onForget }: Props) {
 
       {!empty && (
         <section>
-          <h2 className="mb-3 text-xs uppercase tracking-widest text-muted">Recent swings</h2>
+          <h2 className="mb-3 text-[11px] font-medium uppercase tracking-wide text-muted">Recent swings</h2>
           <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
             {recent.map((c) => (
               <Card key={c.key} clip={c} onOpen={() => onOpen(c)} onForget={() => onForget(c)} />
@@ -94,11 +95,11 @@ function Card({ clip, onOpen, onForget }: { clip: ClipMeta; onOpen: () => void; 
     if (url) URL.revokeObjectURL(url);
   }, [url]);
   const score = clip.summary?.score;
-  const tone = score === undefined ? "text-muted" : score >= 8 ? "text-accent" : score >= 6 ? "text-warn" : "text-bad";
+  const tone = score === undefined ? "text-muted" : score >= 8 ? "text-good" : score >= 6 ? "text-warn" : "text-bad";
   const name = clip.name.replace(/\.[^.]+$/, "");
   return (
     <li className="group relative">
-      <button className="flex w-full flex-col overflow-hidden rounded-xl border border-line bg-panel text-left hover:border-muted" onClick={onOpen}>
+      <button className="flex w-full flex-col overflow-hidden rounded-xl border border-line bg-panel text-left transition-colors hover:border-accent" onClick={onOpen}>
         <div className="relative aspect-[3/4] w-full bg-black">
           {url ? (
             <img src={url} alt="" className="h-full w-full object-cover" />
@@ -106,9 +107,9 @@ function Card({ clip, onOpen, onForget }: { clip: ClipMeta; onOpen: () => void; 
             <div className="flex h-full w-full items-center justify-center text-xs text-muted">no preview</div>
           )}
           {score !== undefined && (
-            <span className={`absolute left-2 top-2 rounded-md bg-black/70 px-1.5 py-0.5 text-sm font-bold tabular-nums ${tone}`}>{score.toFixed(1)}</span>
+            <span className={`absolute left-2 top-2 rounded-md bg-panel/95 px-1.5 py-0.5 font-mono text-sm font-medium tabular-nums ${tone}`}>{score.toFixed(1)}</span>
           )}
-          {!clip.hasBlob && <span className="absolute right-2 top-2 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] text-warn">needs file</span>}
+          {!clip.hasBlob && <span className="absolute right-2 top-2 rounded-md bg-panel/95 px-1.5 py-0.5 text-[10px] font-medium text-warn">needs file</span>}
         </div>
         <div className="flex flex-col gap-0.5 px-2.5 py-2">
           <span className="truncate text-sm font-medium" title={clip.name}>

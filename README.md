@@ -38,6 +38,8 @@ The app opens on a home screen: a drop zone, and once anything has been analysed
 
 The club type (wedge, iron, hybrid, wood, driver) drives the reference lines and target ranges; the text box next to it takes the actual club (“7-iron”), which is saved with the clip, shown on its card and used in the on-video captions.
 
+The palette and type follow roundr.golf, light and dark. The theme follows the OS until the button at the right of the header picks one (system → light → dark); the choice is kept in localStorage and applied before first paint. Both sets of colours live at the top of `src/app/globals.css`.
+
 ## Export
 
 `export video` plays the clip through once at the selected speed and records it with whatever helpers are switched on (skeleton, reference lines, address ghost, ball tracer) burnt in, then downloads the file. The browser's MediaRecorder picks the container: MP4/H.264 where supported (Chrome, Safari), otherwise WebM. Pick 0.25x or 0.5x first for a slow-motion export; the file plays at that speed. `src/lib/export.ts` and `src/lib/overlay-draw.ts` (the same drawing code the on-screen overlay uses).

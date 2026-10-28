@@ -14,10 +14,11 @@ import { canExport, downloadBlob, exportVideo } from "@/lib/export";
 import { drawOverlay } from "@/lib/overlay-draw";
 import { ClipMeta, ClipSettings, deleteClip, fileKey, listClips, loadClip, requestPersistence, saveClip } from "@/lib/store";
 import Home from "./Home";
+import ThemeToggle from "./ThemeToggle";
 
 type Stage = "idle" | "loading-model" | "processing" | "ready";
 
-const selectCls = "rounded-md border border-line bg-panel-2 px-2 py-1 text-sm text-slate-100";
+const selectCls = "rounded-md border border-line bg-panel px-2 py-1 text-sm text-fg";
 const labelCls = "flex items-center gap-2 text-xs text-muted";
 
 export default function Analyzer() {
@@ -426,9 +427,10 @@ export default function Analyzer() {
 
   return (
     <div className="flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
-      <header className="flex shrink-0 flex-wrap items-center gap-4 border-b border-line px-5 py-3">
-        <button className="text-base font-semibold tracking-wide hover:text-accent" onClick={src ? goHome : undefined} title={src ? "Back to your swings" : undefined}>
-          Swing Analyzer
+      <header className="sticky top-0 z-20 flex shrink-0 flex-wrap items-center gap-4 border-b border-line bg-bg/90 px-5 py-3 backdrop-blur">
+        <button className="flex items-center gap-2 font-semibold tracking-tight hover:text-accent" onClick={src ? goHome : undefined} title={src ? "Back to your swings" : undefined}>
+          <img src="/logo.svg" alt="" className="size-5" />
+          Roundr <span className="font-normal text-muted">Swing Analysis</span>
         </button>
         <input
           ref={fileInputRef}
@@ -443,10 +445,10 @@ export default function Analyzer() {
         />
         {src && (
         <div className="flex flex-wrap items-center gap-3">
-          <button className="rounded-md border border-line bg-panel-2 px-3 py-1.5 text-sm" onClick={goHome} disabled={busy}>
+          <button className="rounded-md border border-line bg-panel px-3 py-1.5 text-sm hover:border-line-strong" onClick={goHome} disabled={busy}>
             ← swings
           </button>
-          <button className="max-w-64 truncate rounded-md border border-dashed border-line bg-panel-2 px-3 py-1.5 text-sm" onClick={() => fileInputRef.current?.click()} title="Choose a different clip">
+          <button className="max-w-64 truncate rounded-md border border-dashed border-line-strong bg-panel px-3 py-1.5 text-sm text-muted hover:text-fg" onClick={() => fileInputRef.current?.click()} title="Choose a different clip">
             {fileName || "Choose a swing video"}
           </button>
           <label className={labelCls}>
@@ -501,7 +503,7 @@ export default function Analyzer() {
             </select>
           </label>
           <button
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-emerald-950 disabled:opacity-50"
+            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink hover:bg-accent-hover disabled:opacity-50"
             onClick={run}
             disabled={!src || busy}
           >
@@ -520,9 +522,12 @@ export default function Analyzer() {
           )}
         </div>
         )}
+        <span className="ml-auto">
+          <ThemeToggle />
+        </span>
       </header>
 
-      {error && <div className="mx-5 mt-3 shrink-0 rounded-md border border-bad bg-red-950 px-3 py-2 text-sm">{error}</div>}
+      {error && <div className="mx-5 mt-3 shrink-0 rounded-md border border-bad/40 bg-bad-soft px-3 py-2 text-sm text-bad">{error}</div>}
       {!src && (
         <Home
           recent={recent}
@@ -536,7 +541,7 @@ export default function Analyzer() {
         <section className="flex min-w-0 flex-col gap-3 lg:min-h-0">
           {src && (
             <div
-              className={`relative mx-auto max-h-[72vh] max-w-full overflow-hidden rounded-xl bg-black lg:min-h-0 lg:max-h-none lg:flex-1 ${marking ? "cursor-crosshair ring-2 ring-warn" : ""}`}
+              className={`relative mx-auto max-h-[72vh] max-w-full overflow-hidden rounded-xl bg-black lg:min-h-0 lg:max-h-none lg:flex-1 ${marking ? "cursor-crosshair ring-2 ring-accent" : ""}`}
               style={{ aspectRatio: dims.w && dims.h ? `${dims.w} / ${dims.h}` : "9 / 16" }}
               onPointerDown={onVideoPointerDown}
               onPointerMove={onVideoPointerMove}
@@ -561,7 +566,7 @@ export default function Analyzer() {
                 <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} club={clubProfile} show={show} tracer={tracer} checks={checks} />
               )}
               {stage === "processing" && (
-                <div className="absolute inset-x-0 bottom-0 h-1 bg-white/15">
+                <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20">
                   <div className="h-full bg-accent transition-[width]" style={{ width: `${(progress.done / Math.max(1, progress.total)) * 100}%` }} />
                 </div>
               )}
@@ -578,7 +583,7 @@ export default function Analyzer() {
                 ))}
                 <span className="mx-1 h-4 w-px bg-line" />
                 <button
-                  className={`rounded-md border px-2 py-0.5 ${marking ? "border-warn text-warn" : "border-line hover:border-muted"}`}
+                  className={`rounded-md border px-2 py-0.5 ${marking ? "border-warn text-warn" : "border-line hover:border-line-strong"}`}
                   onClick={() => setMarking((m) => !m)}
                   aria-pressed={marking}
                   disabled={!!exporting}
@@ -591,13 +596,13 @@ export default function Analyzer() {
                   {exporting ? (
                     <>
                       <span className="tabular-nums">exporting {Math.round(exporting.fraction * 100)}% · keep this tab visible</span>
-                      <button className="rounded-md border border-line px-2 py-0.5 hover:border-muted" onClick={() => exportAbort.current?.abort()}>
+                      <button className="rounded-md border border-line px-2 py-0.5 hover:border-line-strong" onClick={() => exportAbort.current?.abort()}>
                         cancel
                       </button>
                     </>
                   ) : (
                     <button
-                      className="rounded-md border border-line px-2 py-0.5 hover:border-muted disabled:opacity-50"
+                      className="rounded-md border border-line px-2 py-0.5 hover:border-line-strong disabled:opacity-50"
                       onClick={runExport}
                       disabled={!canExport()}
                       title={canExport() ? `Download the clip at ${rate}x with the helpers that are switched on` : "This browser cannot record video"}
@@ -636,13 +641,13 @@ export default function Analyzer() {
                     );
                   })}
                   {marks.length > 0 && (
-                    <button className="rounded-md border border-line px-2 py-0.5 hover:border-muted" onClick={() => setMarks([])}>
+                    <button className="rounded-md border border-line px-2 py-0.5 hover:border-line-strong" onClick={() => setMarks([])}>
                       clear all
                     </button>
                   )}
                   {horizonOverride !== null && (
                     <button
-                      className="rounded-md border border-line px-2 py-0.5 hover:border-muted"
+                      className="rounded-md border border-line px-2 py-0.5 hover:border-line-strong"
                       onClick={() => setHorizonOverride(null)}
                       title="Put the horizon back at the estimated camera eye level"
                     >

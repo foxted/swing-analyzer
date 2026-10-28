@@ -29,7 +29,10 @@ export type Metric = {
   id: string;
   label: string;
   value: number;
+  /** Short unit shown right after the value: "°", "%", "° flex", "to 1". */
   unit: string;
+  /** Optional context for the list row: what the number is relative to. */
+  detail?: string;
   target: string;
   deduction: number;
   maxDeduction: number;

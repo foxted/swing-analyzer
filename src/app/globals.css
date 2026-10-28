@@ -1,22 +1,109 @@
 @import "tailwindcss";
 
-@theme {
-  --color-bg: #0b0f14;
-  --color-panel: #121820;
-  --color-panel-2: #182029;
-  --color-line: #233040;
-  --color-muted: #8b98a8;
-  --color-accent: #4ade80;
-  --color-warn: #fbbf24;
-  --color-bad: #f87171;
+/* Palette and type lifted from roundr.golf, both its light and dark sets: warm off-white / near-black,
+   sand borders, terracotta accent, green / amber / red for good / so-so / bad. Numbers in Plex Mono
+   with tabular figures.
+
+   The raw values live on :root so they can flip with the theme; the @theme block maps them to
+   Tailwind utilities (bg-bg, text-accent, ...) by reference. Dark follows the OS unless the user
+   picked one in the header, which sets data-theme on <html>. */
+:root {
+  --bg: #faf8f5;
+  --panel: #ffffff;
+  --panel-2: #f2efe9;
+  --line: #e5e0d7;
+  --line-strong: #cfc8bb;
+  --fg: #1c1a17;
+  --muted: #6e6960;
+  --faint: #9a9389;
+  --accent: #a24a2e;
+  --accent-hover: #8a3d24;
+  --accent-soft: #f7eae4;
+  --accent-ink: #ffffff;
+  --good: #1f7a4a;
+  --good-soft: #e6f2ea;
+  --warn: #9a6207;
+  --warn-soft: #f7eedc;
+  --bad: #ae3323;
+  --bad-soft: #fbe9e6;
+  color-scheme: light;
 }
 
-html {
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12110f;
+    --panel: #1a1815;
+    --panel-2: #23211d;
+    --line: #2e2b26;
+    --line-strong: #403c35;
+    --fg: #edeae4;
+    --muted: #9c968c;
+    --faint: #6e6961;
+    --accent: #d9724f;
+    --accent-hover: #e88c6b;
+    --accent-soft: #2c1811;
+    --accent-ink: #14100d;
+    --good: #63c68a;
+    --good-soft: #152b1f;
+    --warn: #e6ae4e;
+    --warn-soft: #2e2413;
+    --bad: #f58273;
+    --bad-soft: #301714;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12110f;
+  --panel: #1a1815;
+  --panel-2: #23211d;
+  --line: #2e2b26;
+  --line-strong: #403c35;
+  --fg: #edeae4;
+  --muted: #9c968c;
+  --faint: #6e6961;
+  --accent: #d9724f;
+  --accent-hover: #e88c6b;
+  --accent-soft: #2c1811;
+  --accent-ink: #14100d;
+  --good: #63c68a;
+  --good-soft: #152b1f;
+  --warn: #e6ae4e;
+  --warn-soft: #2e2413;
+  --bad: #f58273;
+  --bad-soft: #301714;
   color-scheme: dark;
 }
+
+@theme inline {
+  --font-sans: var(--font-public-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+}
+
 body {
-  @apply bg-bg text-slate-100 antialiased;
+  @apply bg-bg text-fg antialiased;
 }
 input[type="range"] {
   accent-color: var(--color-accent);
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
 }
