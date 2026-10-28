@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Overlay, { TracerState } from "./Overlay";
+import Overlay, { ChecksState, TracerState } from "./Overlay";
 import Timeline, { Rate } from "./Timeline";
 import ScorePanel from "./ScorePanel";
 import { extractFrames, ModelSize } from "@/lib/pose";
@@ -38,6 +38,8 @@ export default function Analyzer() {
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [show, setShow] = useState({ skeleton: true, lines: true, ghost: false, tracer: true });
   const [marks, setMarks] = useState<BallMark[]>([]);
+  /** Check ids drawn on the video (and burnt into exports). */
+  const [shownChecks, setShownChecks] = useState<string[]>([]);
   const [marking, setMarking] = useState(false);
   /** User-dragged horizon (image y, 0..1) for DTL clips; null = use the estimate. */
   const [horizonOverride, setHorizonOverride] = useState<number | null>(null);
@@ -91,6 +93,7 @@ export default function Analyzer() {
     setMarks([]);
     setMarking(false);
     setHorizonOverride(null);
+    setShownChecks([]);
     setCurrent(0);
     setStage("idle");
     setError(null);
@@ -216,6 +219,7 @@ export default function Analyzer() {
             club: CLUBS[club],
             show,
             tracer: { traj: trajectory, marks, t: (index - positions.P4) / fps, showMarks: false },
+            checks: checksFor(index),
           }),
         onProgress: (fraction, index) => {
           setExporting({ fraction });
@@ -280,6 +284,11 @@ export default function Analyzer() {
     ? { traj: trajectory, marks, t: (current - positions.P4) / fps, showMarks: marking, horizon }
     : undefined;
   const landingFrame = trajectory?.tLand != null && positions ? Math.round(positions.P4 + trajectory.tLand * fps) : null;
+  const checksFor = (index: number): ChecksState | undefined =>
+    analysis && positions && shownChecks.length
+      ? { metrics: analysis.metrics, selected: shownChecks, score: analysis.score, positions, currentIndex: index, straightKnee: analysis.straightKnee.angle }
+      : undefined;
+  const checks = checksFor(current);
 
   return (
     <div className="flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
@@ -394,7 +403,7 @@ export default function Analyzer() {
                 }}
               />
               {dims.w > 0 && (
-                <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} club={CLUBS[club]} show={show} tracer={tracer} />
+                <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} club={CLUBS[club]} show={show} tracer={tracer} checks={checks} />
               )}
               {stage === "processing" && (
                 <div className="absolute inset-x-0 bottom-0 h-1 bg-white/15">
@@ -513,7 +522,9 @@ export default function Analyzer() {
             </>
           )}
         </section>
-        {stage === "ready" && <ScorePanel analysis={analysis} onJump={(k) => positions && seekTo(positions[k])} onSeek={seekTo} />}
+        {stage === "ready" && (
+          <ScorePanel analysis={analysis} onJump={(k) => positions && seekTo(positions[k])} onSeek={seekTo} shown={shownChecks} onShown={setShownChecks} />
+        )}
       </main>
     </div>
   );

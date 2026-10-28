@@ -1,5 +1,6 @@
-import { Analysis, CameraView, Frame, Handedness, LM, Metric, Positions, Pt } from "@/lib/types";
-import { angleAt, hands, hipMid, lead, shoulderMid, shoulderWidth, tiltFromVertical, torsoLen, trail, trailKneeSeries } from "@/lib/geometry";
+import { Analysis, CameraView, Frame, Handedness, Metric, Positions, Pt } from "@/lib/types";
+import { hands, hipMid, lead, leadKneeSeries, straightKneeRef, trail, trailKneeSeries } from "@/lib/geometry";
+import { MeasureId, measureCtx, measures } from "@/lib/measures";
 import { ClubProfile } from "@/lib/clubs";
 
 /**
@@ -7,6 +8,9 @@ import { ClubProfile } from "@/lib/clubs";
  * deducts proportionally to how far outside the range it lands. Score = 10 - deductions.
  * Reference ranges are hand-tuned amateur-friendly targets, not tour data.
  */
+
+/** Degrees of knee flex (short of fully straight) below which a knee counts as locked. */
+export const KNEE_LOCKED_FLEX = 5;
 
 type Range = { lo: number; hi: number; tol: number }; // tol = how far past the edge costs the full deduction
 
@@ -37,11 +41,9 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
   const p4 = pick(frames, pos.P4);
   const p6 = pick(frames, pos.P6);
   const metrics: Metric[] = [];
-  if (!p1 || !p3 || !p4) return { view, score: 0, metrics };
+  const straightKnee = straightKneeRef(frames, hand);
+  if (!p1 || !p3 || !p4) return { view, score: 0, metrics, straightKnee };
 
-  const T = Math.max(1e-6, torsoLen(p1));
-  const SW = Math.max(1e-6, shoulderWidth(p1));
-  const L = lead(hand);
   const dir = targetDir(view, hand, p1);
   const r1 = (v: number) => Math.round(v * 10) / 10;
 
@@ -61,9 +63,36 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     positions: ["P1", "P3", "P4"],
   });
 
+  // Knee angles are measured as degrees of flex short of fully straight, where "straight" is
+  // calibrated from the clip (see straightKneeRef): MediaPipe never reads 180° for a locked knee and
+  // the offset differs per person and camera, so absolute thresholds misjudge both checks.
+  const straight = straightKnee.angle;
+  const flexOf = (angle: number) => Math.max(0, straight - angle);
+  const refNote = straightKnee.calibrated ? `straight = ${r1(straight)}°` : `straight assumed ${r1(straight)}°`;
+
+  // Knee flex at address: soft, not locked, not sitting. 3D angle, so it works from either view.
+  const leadKnees = leadKneeSeries(frames, hand);
+  const kneeAddr = leadKnees[pos.P1];
+  if (Number.isFinite(kneeAddr)) {
+    const flex = flexOf(kneeAddr);
+    metrics.push({
+      id: "kneeFlex",
+      label: "Knee flex at address",
+      value: r1(flex),
+      unit: `° of flex (${refNote})`,
+      target: "5 to 25°",
+      deduction: deduct(flex, { lo: KNEE_LOCKED_FLEX, hi: 25, tol: 10 }, 1),
+      maxDeduction: 1,
+      tip: flex < KNEE_LOCKED_FLEX ? "Knees are locked at address. Soften them, like you're about to sit on a tall stool." : "Knees are too bent at address. Stand slightly taller and bend from the hips instead.",
+      positions: ["P1"],
+    });
+  }
+
   // Trail knee lock: the trail knee should keep the flex it had at address through the backswing.
-  // Straightening it kills the trail-hip load and usually brings sway with it. One-sided on purpose:
-  // extra flex going back is never penalised. 3D angle, so it works from either camera view.
+  // Straightening it kills the trail-hip load and usually brings sway with it. Two checks, the worse
+  // one counts: how much flex is left at the knee's straightest point (a locked knee is locked
+  // whatever address looked like) and how much it straightened from address. One-sided on purpose:
+  // extra flex going back is never penalised.
   const kneeSeries = trailKneeSeries(frames, hand);
   const kneeP1 = kneeSeries[pos.P1];
   if (Number.isFinite(kneeP1)) {
@@ -71,50 +100,62 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     const to = Math.max(pos.P1, pos.P3);
     let peak = pos.P1;
     for (let i = from; i <= to; i++) if (kneeSeries[i] > kneeSeries[peak]) peak = i;
-    const straighten = Math.max(0, kneeSeries[peak] - kneeP1);
+    const kneePeak = kneeSeries[peak];
+    const flexTop = flexOf(kneePeak);
+    const flexAddr = flexOf(kneeP1);
+    const straighten = Math.max(0, kneePeak - kneeP1);
+    const tip =
+      flexAddr < KNEE_LOCKED_FLEX
+        ? `Trail knee is already locked at address and stays that way to the top. Set some flex at address and keep it all the way back, knee pointing at the ball.`
+        : flexTop < KNEE_LOCKED_FLEX
+          ? `Trail knee locks going back (${r1(flexAddr)}° of flex at address, ${r1(flexTop)}° at the top). Keep the flex you set at address all the way to the top, knee pointing at the ball.`
+          : `Trail knee straightens going back (${r1(flexAddr)}° of flex at address, ${r1(flexTop)}° at the top). Keep the flex you set at address all the way to the top, knee pointing at the ball.`;
     metrics.push({
       id: "trailKnee",
       label: "Trail knee in backswing",
-      value: r1(straighten),
-      unit: "° straighter than address",
-      target: "under 15°",
-      deduction: deduct(straighten, { lo: -Infinity, hi: 15, tol: 15 }, 1.5),
+      value: r1(flexTop),
+      unit: `° of flex left at its straightest (address ${r1(flexAddr)}°, ${refNote})`,
+      target: `at least ${KNEE_LOCKED_FLEX}°, within 8° of address`,
+      deduction: Math.max(deduct(flexTop, { lo: KNEE_LOCKED_FLEX, hi: Infinity, tol: 5 }, 1.5), deduct(straighten, { lo: -Infinity, hi: 8, tol: 12 }, 1.5)),
       maxDeduction: 1.5,
-      tip: `Trail knee straightens going back (${r1(kneeP1)}° to ${r1(kneeSeries[peak])}°). Keep the flex you set at address all the way to the top, knee pointing at the ball.`,
+      tip,
       positions: ["P1", "P2", "P3"],
       frame: peak,
     });
   }
 
+  const mc = measureCtx(p1, dir, hand);
+  const at = (id: MeasureId, lm: Pt[]) => measures[id](lm, mc);
+
   if (view === "faceOn") {
     // Head sway: nose x displacement toward/away from target, in shoulder widths.
-    const swayTop = ((p3[LM.nose].x - p1[LM.nose].x) * -dir) / SW; // + = away from target
-    const swayImpact = ((p4[LM.nose].x - p1[LM.nose].x) * dir) / SW; // + = toward target
+    const swayTop = at("headSwayBack", p3); // + = away from target
+    const swayImpact = at("headSwayImpact", p4); // + = toward target
     metrics.push({
       id: "headSwayBack",
       label: "Head sway going back",
-      value: r1(swayTop * 100),
+      value: r1(swayTop),
       unit: "% of shoulder width",
       target: "-10 to 25%",
-      deduction: deduct(swayTop, { lo: -0.1, hi: 0.25, tol: 0.3 }, 2),
+      deduction: deduct(swayTop, { lo: -10, hi: 25, tol: 30 }, 2),
       maxDeduction: 2,
-      tip: swayTop > 0.25 ? "Head slides away from the target going back. Turn around your trail hip instead of sliding onto it." : "Head moves toward the target going back. Let your weight settle into the trail foot at the top.",
+      tip: swayTop > 25 ? "Head slides away from the target going back. Turn around your trail hip instead of sliding onto it." : "Head moves toward the target going back. Let your weight settle into the trail foot at the top.",
       positions: ["P1", "P3"],
     });
     metrics.push({
       id: "headSwayImpact",
       label: "Head at impact",
-      value: r1(swayImpact * 100),
+      value: r1(swayImpact),
       unit: "% of shoulder width",
       target: `${club.headAtImpact[0] * 100} to ${club.headAtImpact[1] * 100}%`,
-      deduction: deduct(swayImpact, { lo: club.headAtImpact[0], hi: club.headAtImpact[1], tol: 0.3 }, 1.5),
+      deduction: deduct(swayImpact, { lo: club.headAtImpact[0] * 100, hi: club.headAtImpact[1] * 100, tol: 30 }, 1.5),
       maxDeduction: 1.5,
-      tip: swayImpact > club.headAtImpact[1] ? "Head lunges past the ball at impact. Keep your head behind the ball until the club has struck it." : "Head stays well behind at impact. Push your weight onto the lead foot as you start down.",
+      tip: swayImpact > club.headAtImpact[1] * 100 ? "Head lunges past the ball at impact. Keep your head behind the ball until the club has struck it." : "Head stays well behind at impact. Push your weight onto the lead foot as you start down.",
       positions: ["P1", "P4"],
     });
 
     // Lead arm straightness at the top.
-    const leadArm = angleAt(p3[L.shoulder], p3[L.elbow], p3[L.wrist]);
+    const leadArm = at("leadArm", p3);
     metrics.push({
       id: "leadArm",
       label: "Lead arm at the top",
@@ -128,21 +169,21 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     });
 
     // Hip position at impact: lead hip should be over or ahead of lead ankle.
-    const hipLead = ((p4[L.hip].x - p4[L.ankle].x) * dir) / SW;
+    const hipLead = at("hipImpact", p4);
     metrics.push({
       id: "hipImpact",
       label: "Hips at impact",
-      value: r1(hipLead * 100),
+      value: r1(hipLead),
       unit: "% ahead of lead ankle",
       target: "0 to 35%",
-      deduction: deduct(hipLead, { lo: 0, hi: 0.35, tol: 0.3 }, 1.5),
+      deduction: deduct(hipLead, { lo: 0, hi: 35, tol: 30 }, 1.5),
       maxDeduction: 1.5,
       tip: hipLead < 0 ? "Hips hang back at impact. Start the downswing by pushing into the lead foot." : "Hips slide past the lead foot. Turn the lead hip back behind you instead of sliding.",
       positions: ["P4"],
     });
 
     // Spine tilt at address (away from target).
-    const tilt = tiltFromVertical(hipMid(p1), shoulderMid(p1)) * -dir; // + = away from target
+    const tilt = at("spineTilt", p1);
     metrics.push({
       id: "spineTilt",
       label: "Spine tilt at address",
@@ -157,14 +198,14 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
 
     // Finish: hips stacked over the lead foot.
     if (p6) {
-      const finishHips = ((hipMid(p6).x - p6[L.ankle].x) * dir) / SW;
+      const finishHips = at("finish", p6);
       metrics.push({
         id: "finish",
         label: "Balance at finish",
-        value: r1(finishHips * 100),
+        value: r1(finishHips),
         unit: "% of shoulder width",
         target: "-25 to 15%",
-        deduction: deduct(finishHips, { lo: -0.25, hi: 0.15, tol: 0.3 }, 1),
+        deduction: deduct(finishHips, { lo: -25, hi: 15, tol: 30 }, 1),
         maxDeduction: 1,
         tip: "Weight isn't fully on the lead foot at the finish. Hold your finish for three seconds, trail heel up, chest at the target.",
         positions: ["P6"],
@@ -172,7 +213,7 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     }
   } else {
     // DTL
-    const spineP1 = Math.abs(tiltFromVertical(hipMid(p1), shoulderMid(p1)));
+    const spineP1 = at("posture", p1);
     metrics.push({
       id: "posture",
       label: "Posture at address",
@@ -185,35 +226,21 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       positions: ["P1"],
     });
 
-    const knee = angleAt(p1[L.hip], p1[L.knee], p1[L.ankle]);
-    metrics.push({
-      id: "kneeFlex",
-      label: "Knee flex at address",
-      value: r1(knee),
-      unit: "° (180 = straight)",
-      target: "150 to 172°",
-      deduction: deduct(knee, { lo: 150, hi: 172, tol: 15 }, 1),
-      maxDeduction: 1,
-      tip: knee > 172 ? "Knees are locked at address. Soften them, like you're about to sit on a tall stool." : "Knees are too bent at address. Stand slightly taller and bend from the hips instead.",
-      positions: ["P1"],
-    });
-
     // Early extension: hips moving toward the ball between address and impact.
-    const ee = ((hipMid(p4).x - hipMid(p1).x) * dir) / T; // + = toward ball
+    const ee = at("earlyExtension", p4); // + = toward ball
     metrics.push({
       id: "earlyExtension",
       label: "Early extension",
-      value: r1(ee * 100),
+      value: r1(ee),
       unit: "% of torso toward the ball",
       target: `${club.earlyExtension[0] * 100} to ${club.earlyExtension[1] * 100}%`,
-      deduction: deduct(ee, { lo: club.earlyExtension[0], hi: club.earlyExtension[1], tol: 0.25 }, 2),
+      deduction: deduct(ee, { lo: club.earlyExtension[0] * 100, hi: club.earlyExtension[1] * 100, tol: 25 }, 2),
       maxDeduction: 2,
       tip: "Hips move toward the ball coming down. Keep your trail glute back, as if against a wall, through impact.",
       positions: ["P1", "P4"],
     });
 
-    const spineP4 = Math.abs(tiltFromVertical(hipMid(p4), shoulderMid(p4)));
-    const spineDelta = spineP4 - spineP1;
+    const spineDelta = at("spineMaintain", p4);
     metrics.push({
       id: "spineMaintain",
       label: "Posture at impact",
@@ -226,38 +253,37 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
       positions: ["P1", "P4"],
     });
 
-    const headDrop = (p4[LM.nose].y - p1[LM.nose].y) / T; // + = lower in image
+    const headDrop = at("headHeight", p4); // + = lower in image
     metrics.push({
       id: "headHeight",
       label: "Head height at impact",
-      value: r1(headDrop * 100),
+      value: r1(headDrop),
       unit: "% of torso (positive = lower)",
       target: "-10 to 15%",
-      deduction: deduct(headDrop, { lo: -0.1, hi: 0.15, tol: 0.25 }, 1),
+      deduction: deduct(headDrop, { lo: -10, hi: 15, tol: 25 }, 1),
       maxDeduction: 1,
-      tip: headDrop < -0.1 ? "Head rises into impact. Keep the chest over the ball through the strike." : "Head drops a lot into impact. Stay at your address height.",
+      tip: headDrop < -10 ? "Head rises into impact. Keep the chest over the ball through the strike." : "Head drops a lot into impact. Stay at your address height.",
       positions: ["P1", "P4"],
     });
 
     // P2 hands relative to the toe line (on plane = hands over or just outside the toes).
     if (p2) {
-      const toes = (p2[LM.leftFootIndex].x + p2[LM.rightFootIndex].x) / 2;
-      const handsP2 = ((hands(p2).x - toes) * dir) / T; // + = outside toe line (toward ball)
+      const handsP2 = at("p2Hands", p2); // + = outside toe line (toward ball)
       metrics.push({
         id: "p2Hands",
         label: "Takeaway hands",
-        value: r1(handsP2 * 100),
+        value: r1(handsP2),
         unit: "% of torso outside the toes",
         target: "-20 to 20%",
-        deduction: deduct(handsP2, { lo: -0.2, hi: 0.2, tol: 0.3 }, 1),
+        deduction: deduct(handsP2, { lo: -20, hi: 20, tol: 30 }, 1),
         maxDeduction: 1,
-        tip: handsP2 > 0.2 ? "Hands move out away from you in the takeaway. Keep them in front of your chest as the chest turns." : "Hands pull in behind you in the takeaway. Let the chest turn move the hands and keep them in front of you.",
+        tip: handsP2 > 20 ? "Hands move out away from you in the takeaway. Keep them in front of your chest as the chest turns." : "Hands pull in behind you in the takeaway. Let the chest turn move the hands and keep them in front of you.",
         positions: ["P2"],
       });
     }
 
     // Lead arm at the top, same as face-on.
-    const leadArm = angleAt(p3[L.shoulder], p3[L.elbow], p3[L.wrist]);
+    const leadArm = at("leadArm", p3);
     metrics.push({
       id: "leadArm",
       label: "Lead arm at the top",
@@ -273,5 +299,5 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
 
   const total = metrics.reduce((s, m) => s + m.deduction, 0);
   const score = Math.max(0, Math.round((10 - total) * 10) / 10);
-  return { view, score, metrics: metrics.map((m) => ({ ...m, deduction: Math.round(m.deduction * 10) / 10 })) };
+  return { view, score, metrics: metrics.map((m) => ({ ...m, deduction: Math.round(m.deduction * 10) / 10 })), straightKnee };
 }

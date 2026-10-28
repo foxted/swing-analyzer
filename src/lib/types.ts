@@ -43,6 +43,8 @@ export type Analysis = {
   view: CameraView;
   score: number;
   metrics: Metric[];
+  /** Knee angle that reads as fully straight for this clip, and whether it came from the clip or a default. */
+  straightKnee: { angle: number; calibrated: boolean };
 };
 
 // MediaPipe Pose landmark indices

@@ -2,6 +2,9 @@ import { CameraView, Frame, Handedness, LM, Pt, SKELETON } from "@/lib/types";
 import { hands, hipMid, lead, shoulderMid, torsoLen } from "@/lib/geometry";
 import { ClubProfile } from "@/lib/clubs";
 import { BallMark, Trajectory, evalTrajectory, samplePath } from "@/lib/tracer";
+import { ChecksState, drawChecks } from "@/lib/annotations";
+
+export type { ChecksState } from "@/lib/annotations";
 
 /**
  * Everything drawn on top of the video, as a plain canvas function so the on-screen overlay and
@@ -31,6 +34,8 @@ export type DrawParams = {
   club: ClubProfile;
   show: ShowFlags;
   tracer?: TracerState;
+  /** Selected checks drawn as annotations and a stats card. */
+  checks?: ChecksState;
 };
 
 const C = {
@@ -44,7 +49,7 @@ const C = {
 };
 
 export function drawOverlay(ctx: CanvasRenderingContext2D, p: DrawParams) {
-  const { width, height, frame, address, view, hand, club, show, tracer } = p;
+  const { width, height, frame, address, view, hand, club, show, tracer, checks } = p;
   const px = (p: Pt) => ({ x: p.x * width, y: p.y * height });
   const lw = Math.max(2, width / 400);
 
@@ -151,6 +156,9 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, p: DrawParams) {
     const L = lead(hand);
     drawSkeleton(ctx, frame.lm, px, lw, C.bone, C.joint, C.leadArm, [L.shoulder, L.elbow, L.wrist]);
   }
+
+  // Selected checks: geometry with live numbers, and the stats card.
+  if (checks) drawChecks(ctx, { width, height, frame, address, view, hand, checks });
 
   // Ball tracer: comet from impact to the current frame, on top of everything. In marking mode
   // also show the whole fitted path and where the fit puts the ball on this frame, so wrong

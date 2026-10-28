@@ -132,3 +132,27 @@ export function trailKneeSeries(frames: Frame[], hand: Handedness): number[] {
   const t = trail(hand);
   return smooth(frames.map((f) => kneeAngle(f, t)), 2);
 }
+/** Smoothed per-frame lead knee angle (NaN where unknown). */
+export function leadKneeSeries(frames: Frame[], hand: Handedness): number[] {
+  const l = lead(hand);
+  return smooth(frames.map((f) => kneeAngle(f, l)), 2);
+}
+
+/** Fallback for a fully straight leg in MediaPipe's angles when the clip never shows one. */
+export const STRAIGHT_KNEE_DEFAULT = 175;
+
+/**
+ * What "fully straight" reads as for this golfer and camera. MediaPipe's hip landmark sits off the
+ * joint axis, so a locked knee comes out around 172-178° rather than 180°, and the offset varies by
+ * person, view and model. The straightest either knee gets anywhere in the clip is a good estimate:
+ * the lead leg posts straight through impact or at the finish in nearly every swing. Taken as a high
+ * percentile over both legs rather than the raw max so a single bad frame cannot set it. Returns the
+ * fallback, flagged, when the clip has no leg data or never shows a plausibly straight leg.
+ */
+export function straightKneeRef(frames: Frame[], hand: Handedness): { angle: number; calibrated: boolean } {
+  const all = [...trailKneeSeries(frames, hand), ...leadKneeSeries(frames, hand)].filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  if (all.length < 10) return { angle: STRAIGHT_KNEE_DEFAULT, calibrated: false };
+  const ref = all[Math.min(all.length - 1, Math.floor(all.length * 0.98))];
+  if (ref < 160) return { angle: STRAIGHT_KNEE_DEFAULT, calibrated: false };
+  return { angle: ref, calibrated: true };
+}
