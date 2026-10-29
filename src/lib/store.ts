@@ -1,4 +1,4 @@
-import { CameraView, Frame, Handedness, Positions } from "@/lib/types";
+import { CameraView, ClubMark, Frame, Handedness, Positions } from "@/lib/types";
 import { ClubType } from "@/lib/clubs";
 import { ModelSize } from "@/lib/pose";
 import { BallMark } from "@/lib/tracer";
@@ -32,10 +32,14 @@ export type ClipSettings = {
   /** Free-text club name, e.g. "7-iron"; empty = just the type. */
   clubLabel?: string;
   viewOverride: CameraView | "auto";
-  show: { skeleton: boolean; lines: boolean; ghost: boolean; tracer: boolean };
+  show: { skeleton: boolean; lines: boolean; ghost: boolean; tracer: boolean; shaft?: boolean };
   marks: BallMark[];
+  /** Hand-placed clubhead marks; absent on clips saved before shaft support. */
+  clubMarks?: ClubMark[];
   horizonOverride: number | null;
   shownChecks: string[];
+  /** Where the user dragged the on-video stats card (normalised top-left); absent = default. */
+  cardPos?: { x: number; y: number } | null;
 };
 
 /** What the home screen shows on a card. */

@@ -1,6 +1,8 @@
 import { CameraView, Frame, Handedness, LM, Metric, Positions, Pt } from "@/lib/types";
 import { hands, hipMid, lead, shoulderMid, trail } from "@/lib/geometry";
-import { MeasureId, leadKnee, measureCtx, measures, trailKnee } from "@/lib/measures";
+import { MeasureCtx, MeasureId, leadKnee, measureCtx, measures, shaftFromHorizontal, shaftSteepness, trailKnee, wristSet } from "@/lib/measures";
+import { ResolvedShaft } from "@/lib/shaft";
+import { ClubProfile } from "@/lib/clubs";
 
 /**
  * On-video check annotations: for each selected check, the geometry it measures drawn on the
@@ -17,12 +19,20 @@ export type ChecksState = {
   currentIndex: number;
   /** Knee angle that reads as fully straight for this clip (see geometry.ts straightKneeRef). */
   straightKnee: number;
+  /** Clubhead on the current frame, for the shaft checks. */
+  shaft?: ResolvedShaft | null;
+  club?: ClubProfile;
+  /** Top-left of the stats card, normalised (0..1); null or absent = default below the top safe margin. */
+  cardPos?: { x: number; y: number } | null;
 };
+
+/** Where the stats card was drawn, in canvas pixels, so the UI can let the user drag it. */
+export type CardRect = { x: number; y: number; w: number; h: number };
 
 type P = { x: number; y: number };
 type Env = {
   ctx: CanvasRenderingContext2D;
-  px: (p: Pt) => P;
+  px: (p: { x: number; y: number }) => P;
   width: number;
   height: number;
   /** Base unit for strokes and radii. */
@@ -35,6 +45,14 @@ type Env = {
 };
 
 const COLOR = { good: "#4ade80", warn: "#fbbf24", bad: "#f87171", ref: "rgba(255,255,255,0.75)" };
+
+/**
+ * Safe margins for social video, as fractions of the frame height. Instagram and TikTok draw the
+ * status bar, header or account name over the top ~13% and the caption and controls over the
+ * bottom ~20%, so the card and the tempo bar stay clear of both.
+ */
+const SAFE_TOP = 0.14;
+const SAFE_BOTTOM = 0.22;
 
 function tone(m: Metric): string {
   return m.deduction === 0 ? COLOR.good : m.deduction < m.maxDeduction / 2 ? COLOR.warn : COLOR.bad;
@@ -60,9 +78,9 @@ function targetDir(view: CameraView, hand: Handedness, lm: Pt[]): number {
 export function drawChecks(
   ctx: CanvasRenderingContext2D,
   o: { width: number; height: number; frame: Frame | undefined; address: Frame | undefined; view: CameraView; hand: Handedness; checks: ChecksState }
-) {
+): CardRect | null {
   const { width, height, frame, address, view, hand, checks } = o;
-  if (!checks.selected.length) return;
+  if (!checks.selected.length) return null;
   const long = Math.max(width, height);
   const u = Math.max(2, long / 480);
   const font = Math.max(12, Math.round(long / 64));
@@ -86,28 +104,65 @@ export function drawChecks(
       hand,
       dir: targetDir(view, hand, address.lm),
     };
-    const mc = measureCtx(address.lm, env.dir, hand);
+    const mc = measureCtx(address.lm, env.dir, hand, width / height);
     const live = (id: MeasureId) => measures[id](frame.lm!, mc);
     for (const id of selected) {
       const m = byId.get(id);
       if (!m) continue;
-      drawGeometry(env, m, id, live, frame, checks);
+      drawGeometry(env, m, id, live, frame, checks, mc);
     }
   }
 
-  drawCard(ctx, checks, selected, byId, u, font);
+  const card = drawCard(ctx, checks, selected, byId, u, font);
   ctx.restore();
+  return card;
 }
 
 // ---------------------------------------------------------------------------------------------
 // Per-check geometry
 
-function drawGeometry(env: Env, m: Metric, id: string, live: (id: MeasureId) => number, frame: Frame, checks: ChecksState) {
+function drawGeometry(env: Env, m: Metric, id: string, live: (id: MeasureId) => number, frame: Frame, checks: ChecksState, mc: MeasureCtx) {
   const { lm, p1, px, hand, dir } = env;
   const L = lead(hand);
   const T = trail(hand);
   const c = tone(m);
   switch (id) {
+    case "wristTop":
+    case "lag": {
+      const s = checks.shaft;
+      if (!s) return;
+      const h = px(hands(lm));
+      const head = px(s);
+      const w = px(lm[L.wrist]);
+      line(env, h, head, c, env.u * 1.4);
+      // Arc at the wrist between the forearm and the shaft direction carried to the wrist.
+      angle(env, px(lm[L.elbow]), w, { x: w.x + (head.x - h.x), y: w.y + (head.y - h.y) }, c, `${deg(wristSet(lm, s, mc))} wrist set`, true);
+      return;
+    }
+    case "shaftTop": {
+      const s = checks.shaft;
+      if (!s) return;
+      const h = px(hands(lm));
+      const head = px(s);
+      const half = env.width * 0.1;
+      line(env, { x: h.x - half, y: h.y }, { x: h.x + half, y: h.y }, COLOR.ref, env.u * 0.6, true);
+      line(env, h, head, c, env.u * 1.4);
+      label(env, `shaft ${signed(shaftFromHorizontal(lm, s, mc))}° from parallel`, head.x, head.y - env.font * 1.6, c);
+      return;
+    }
+    case "shaftDelivery": {
+      const s = checks.shaft;
+      if (!s || !checks.club) return;
+      const h = px(hands(lm));
+      const head = px(s);
+      // Address plane through the current hands for reference.
+      const rad = (checks.club.shaftAngle * Math.PI) / 180;
+      const len = Math.hypot(head.x - h.x, head.y - h.y) * 1.3;
+      line(env, h, { x: h.x + dir * Math.cos(rad) * len, y: h.y + Math.sin(rad) * len }, COLOR.ref, env.u * 0.6, true);
+      line(env, h, head, c, env.u * 1.4);
+      label(env, `shaft ${signed(shaftSteepness(lm, s, mc) - checks.club.shaftAngle)}° vs address plane`, head.x, head.y - env.font * 1.6, c);
+      return;
+    }
     case "trailKnee": {
       const v = trailKnee(frame, hand);
       if (!Number.isFinite(v)) return;
@@ -171,7 +226,7 @@ function drawGeometry(env: Env, m: Metric, id: string, live: (id: MeasureId) => 
       return;
     }
     case "p2Hands": {
-      const toes = px({ x: (lm[LM.leftFootIndex].x + lm[LM.rightFootIndex].x) / 2, y: 0, z: 0 });
+      const toes = px({ x: (lm[LM.leftFootIndex].x + lm[LM.rightFootIndex].x) / 2, y: 0 });
       const h = px(hands(lm));
       line(env, { x: toes.x, y: 0 }, { x: toes.x, y: env.height }, COLOR.ref, env.u * 0.6, true);
       arrow(env, { x: toes.x, y: h.y }, h, c);
@@ -275,7 +330,7 @@ function tempoBar(env: Env, t: number, phase: string, color: string, ratio: numb
   const w = Math.min(width * 0.5, font * 14);
   const h = font * 0.5;
   const x = width - w - font;
-  const y = height - font * 2.2;
+  const y = Math.min(height - font * 2.2, Math.round(height * (1 - SAFE_BOTTOM)));
   ctx.fillStyle = "rgba(8, 12, 18, 0.72)";
   roundRect(ctx, x - font * 0.6, y - font * 1.6, w + font * 1.2, h + font * 2.6, font * 0.6);
   ctx.fill();
@@ -303,10 +358,10 @@ function tempoBar(env: Env, t: number, phase: string, color: string, ratio: numb
 // ---------------------------------------------------------------------------------------------
 // Stats card
 
-function drawCard(ctx: CanvasRenderingContext2D, checks: ChecksState, selected: string[], byId: Map<string, Metric>, u: number, font: number) {
+function drawCard(ctx: CanvasRenderingContext2D, checks: ChecksState, selected: string[], byId: Map<string, Metric>, u: number, font: number): CardRect | null {
   const rows = selected.filter((id) => id !== "score").map((id) => byId.get(id)!);
   const showScore = selected.includes("score");
-  if (!rows.length && !showScore) return;
+  if (!rows.length && !showScore) return null;
   const pad = font * 0.8;
   const lineH = font * 1.5;
   const scoreH = showScore ? font * 2.6 : 0;
@@ -315,10 +370,18 @@ function drawCard(ctx: CanvasRenderingContext2D, checks: ChecksState, selected: 
   const valueText = (m: Metric) => `${m.value}${shortUnit(m)}`;
   for (const m of rows) w = Math.max(w, ctx.measureText(m.label).width + font * 1.5 + ctx.measureText(valueText(m)).width + font * 1.4);
   const h = pad * 2 + scoreH + rows.length * lineH;
-  const x = font;
-  const y = font;
+  const W = ctx.canvas.width;
+  const H = ctx.canvas.height;
+  const cw = w + pad * 2;
+  // Default: left edge, below the top safe margin. A dragged position is kept inside the frame.
+  let x = font;
+  let y = Math.max(font, Math.round(H * SAFE_TOP));
+  if (checks.cardPos) {
+    x = Math.max(0, Math.min(W - cw, checks.cardPos.x * W));
+    y = Math.max(0, Math.min(H - h, checks.cardPos.y * H));
+  }
   ctx.fillStyle = "rgba(8, 12, 18, 0.72)";
-  roundRect(ctx, x, y, w + pad * 2, h, font * 0.7);
+  roundRect(ctx, x, y, cw, h, font * 0.7);
   ctx.fill();
   let cy = y + pad;
   ctx.textBaseline = "middle";
@@ -352,4 +415,5 @@ function drawCard(ctx: CanvasRenderingContext2D, checks: ChecksState, selected: 
     ctx.fillText(valueText(m), x + pad + w, my);
     cy += lineH;
   }
+  return { x, y, w: cw, h };
 }

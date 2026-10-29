@@ -1,17 +1,26 @@
-import { CameraView, Frame, Handedness, LM, Pt, SKELETON } from "@/lib/types";
+import { CameraView, ClubMark, Frame, Handedness, LM, Pt, SKELETON } from "@/lib/types";
+import { ResolvedShaft } from "@/lib/shaft";
 import { hands, hipMid, lead, shoulderMid, torsoLen } from "@/lib/geometry";
 import { ClubProfile } from "@/lib/clubs";
 import { BallMark, Trajectory, evalTrajectory, samplePath } from "@/lib/tracer";
-import { ChecksState, drawChecks } from "@/lib/annotations";
+import { CardRect, ChecksState, drawChecks } from "@/lib/annotations";
 
-export type { ChecksState } from "@/lib/annotations";
+export type { ChecksState, CardRect } from "@/lib/annotations";
 
 /**
  * Everything drawn on top of the video, as a plain canvas function so the on-screen overlay and
  * the video exporter render exactly the same thing.
  */
 
-export type ShowFlags = { skeleton: boolean; lines: boolean; ghost: boolean; tracer: boolean };
+export type ShowFlags = { skeleton: boolean; lines: boolean; ghost: boolean; tracer: boolean; shaft: boolean };
+
+export type ShaftState = {
+  /** Clubhead for the current frame (mark or automatic), null when neither exists. */
+  current: ResolvedShaft | null;
+  marks: ClubMark[];
+  /** Club-marking mode: draw the marks. */
+  showMarks: boolean;
+};
 
 export type TracerState = {
   traj: Trajectory | null;
@@ -34,6 +43,7 @@ export type DrawParams = {
   club: ClubProfile;
   show: ShowFlags;
   tracer?: TracerState;
+  shaft?: ShaftState;
   /** Selected checks drawn as annotations and a stats card. */
   checks?: ChecksState;
 };
@@ -46,11 +56,14 @@ const C = {
   refFill: "rgba(251, 191, 36, 0.12)",
   ghost: "rgba(255,255,255,0.28)",
   horizon: "rgba(125, 211, 252, 0.8)",
+  shaft: "#f0abfc",
+  shaftAuto: "rgba(240, 171, 252, 0.7)",
 };
 
-export function drawOverlay(ctx: CanvasRenderingContext2D, p: DrawParams) {
-  const { width, height, frame, address, view, hand, club, show, tracer, checks } = p;
-  const px = (p: Pt) => ({ x: p.x * width, y: p.y * height });
+/** Draws everything and reports where the stats card landed (null when none). */
+export function drawOverlay(ctx: CanvasRenderingContext2D, p: DrawParams): { card: CardRect | null } {
+  const { width, height, frame, address, view, hand, club, show, tracer, shaft, checks } = p;
+  const px = (p: { x: number; y: number }) => ({ x: p.x * width, y: p.y * height });
   const lw = Math.max(2, width / 400);
 
   // Reference lines locked from address.
@@ -81,7 +94,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, p: DrawParams) {
       ctx.moveTo(hm.x, 0);
       ctx.lineTo(hm.x, height);
       ctx.stroke();
-      const toes = px({ x: (a[LM.leftFootIndex].x + a[LM.rightFootIndex].x) / 2, y: 0, z: 0 });
+      const toes = px({ x: (a[LM.leftFootIndex].x + a[LM.rightFootIndex].x) / 2, y: 0 });
       ctx.beginPath();
       ctx.moveTo(toes.x, 0);
       ctx.lineTo(toes.x, height);
@@ -157,8 +170,14 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, p: DrawParams) {
     drawSkeleton(ctx, frame.lm, px, lw, C.bone, C.joint, C.leadArm, [L.shoulder, L.elbow, L.wrist]);
   }
 
+  // Club shaft: hands to clubhead, from a hand mark or the automatic detection.
+  if (shaft && frame?.lm) {
+    if (show.shaft && shaft.current) drawShaft(ctx, px(hands(frame.lm)), px(shaft.current), shaft.current.source, lw);
+    if (shaft.showMarks) drawClubMarks(ctx, shaft.marks, frame.index, width, height, lw);
+  }
+
   // Selected checks: geometry with live numbers, and the stats card.
-  if (checks) drawChecks(ctx, { width, height, frame, address, view, hand, checks });
+  const card = checks ? drawChecks(ctx, { width, height, frame, address, view, hand, checks }) : null;
 
   // Ball tracer: comet from impact to the current frame, on top of everything. In marking mode
   // also show the whole fitted path and where the fit puts the ball on this frame, so wrong
@@ -175,6 +194,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, p: DrawParams) {
       drawMarks(ctx, tracer.marks, frame?.index, width, height, lw);
     }
   }
+  return { card };
 }
 
 const trailIdx = (h: Handedness) => (h === "right" ? LM.rightAnkle : LM.leftAnkle);
@@ -375,6 +395,56 @@ function drawPathPreview(ctx: CanvasRenderingContext2D, tr: Trajectory, tCur: nu
     ctx.beginPath();
     ctx.arc(q.x * width, q.y * height, lw * 3.5, 0, Math.PI * 2);
     ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Shaft line from the hands to the clubhead; dashed when it came from the automatic detection. */
+function drawShaft(ctx: CanvasRenderingContext2D, h: { x: number; y: number }, c: { x: number; y: number }, source: "mark" | "auto", lw: number) {
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.strokeStyle = source === "mark" ? C.shaft : C.shaftAuto;
+  ctx.lineWidth = lw * 1.4;
+  ctx.setLineDash(source === "mark" ? [] : [lw * 3, lw * 2.5]);
+  ctx.beginPath();
+  ctx.moveTo(h.x, h.y);
+  ctx.lineTo(c.x, c.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = source === "mark" ? C.shaft : C.shaftAuto;
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, lw * 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawClubMarks(ctx: CanvasRenderingContext2D, marks: ClubMark[], currentFrame: number, width: number, height: number, lw: number) {
+  ctx.save();
+  ctx.lineWidth = Math.max(1, lw * 0.6);
+  for (const m of marks) {
+    const x = m.x * width;
+    const y = m.y * height;
+    const here = m.frame === currentFrame;
+    ctx.strokeStyle = here ? C.shaft : C.shaftAuto;
+    const r = lw * (here ? 3 : 2.2);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - r * 1.8, y);
+    ctx.lineTo(x - r * 0.6, y);
+    ctx.moveTo(x + r * 0.6, y);
+    ctx.lineTo(x + r * 1.8, y);
+    ctx.moveTo(x, y - r * 1.8);
+    ctx.lineTo(x, y - r * 0.6);
+    ctx.moveTo(x, y + r * 0.6);
+    ctx.lineTo(x, y + r * 1.8);
+    ctx.stroke();
+    if (here) {
+      ctx.fillStyle = C.shaft;
+      ctx.font = `${Math.round(lw * 4.5)}px system-ui`;
+      ctx.fillText(`club #${m.frame}`, x + r * 2, y - r);
+    }
   }
   ctx.restore();
 }

@@ -1,6 +1,8 @@
-import { Analysis, CameraView, Frame, Handedness, Metric, Positions, Pt } from "@/lib/types";
+import { Analysis, CameraView, ClubMark, Frame, Handedness, Metric, Positions, Pt } from "@/lib/types";
 import { hands, hipMid, lead, leadKneeSeries, straightKneeRef, trail, trailKneeSeries } from "@/lib/geometry";
-import { MeasureId, measureCtx, measures } from "@/lib/measures";
+import { MeasureId, measureCtx, measures, shaftFromHorizontal, shaftSteepness, wristSet } from "@/lib/measures";
+import { shaftAt } from "@/lib/shaft";
+import { deliveryFrame } from "@/lib/positions";
 import { ClubProfile } from "@/lib/clubs";
 
 /**
@@ -36,17 +38,24 @@ function pick(frames: Frame[], i: number): Pt[] | null {
   return frames[i]?.lm ?? null;
 }
 
-export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand: Handedness, club: ClubProfile): Analysis {
+/** Wrist set at the top: degrees between lead forearm and shaft (180 = none). */
+export const WRIST_TOP = { lo: 55, hi: 110 };
+/** Lag at delivery: above this the wrists have released early (casting). */
+export const LAG_MAX = 115;
+
+export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand: Handedness, club: ClubProfile, clubMarks: ClubMark[] = []): Analysis {
   const p1 = pick(frames, pos.P1);
   const p2 = pick(frames, pos.P2);
   const p3 = pick(frames, pos.P3);
   const p4 = pick(frames, pos.P4);
   const p6 = pick(frames, pos.P6);
   const metrics: Metric[] = [];
+  const missingShaft: string[] = [];
   const straightKnee = straightKneeRef(frames, hand);
-  if (!p1 || !p3 || !p4) return { view, score: 0, metrics, straightKnee };
+  if (!p1 || !p3 || !p4) return { view, score: 0, metrics, straightKnee, missingShaft };
 
   const dir = targetDir(view, hand, p1);
+  const aspect = frames[pos.P1]?.aspect ?? 1;
   const r1 = (v: number) => Math.round(v * 10) / 10;
 
   // Tempo applies to both views.
@@ -128,8 +137,81 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
     });
   }
 
-  const mc = measureCtx(p1, dir, hand);
+  const mc = measureCtx(p1, dir, hand, aspect);
   const at = (id: MeasureId, lm: Pt[]) => measures[id](lm, mc);
+
+  // Shaft checks: need the clubhead on the frame, from a hand mark or the automatic detection.
+  const delivery = deliveryFrame(frames, pos);
+  const shaftTop = shaftAt(frames[pos.P3], clubMarks);
+  const shaftDel = shaftAt(frames[delivery], clubMarks);
+  const pDel = pick(frames, delivery);
+  if (view === "faceOn") {
+    if (shaftTop) {
+      const set = wristSet(p3, shaftTop, mc);
+      metrics.push({
+        id: "wristTop",
+        label: "Wrist set at the top",
+        value: r1(set),
+        unit: "°",
+        detail: "lead forearm to shaft · 90° = fully set, 180° = none",
+        target: `${WRIST_TOP.lo} to ${WRIST_TOP.hi}°`,
+        deduction: deduct(set, { lo: WRIST_TOP.lo, hi: WRIST_TOP.hi, tol: 25 }, 1),
+        maxDeduction: 1,
+        tip: set > WRIST_TOP.hi ? "Little wrist set at the top. Let the wrists hinge going back so the shaft sits close to 90° to the lead arm." : "Over-hinged at the top. Keep the hinge short of 90° so you do not have to recover it on the way down.",
+        positions: ["P3"],
+      });
+    } else missingShaft.push("Wrist set at the top");
+    if (shaftTop && shaftDel && pDel) {
+      const top = wristSet(p3, shaftTop, mc);
+      const del = wristSet(pDel, shaftDel, mc);
+      const opened = del - top;
+      metrics.push({
+        id: "lag",
+        label: "Lag at delivery",
+        value: r1(del),
+        unit: "°",
+        detail: `opened ${r1(opened)}° since the top · hands at hip height coming down`,
+        target: `${LAG_MAX}° or less`,
+        deduction: deduct(del, { lo: -Infinity, hi: LAG_MAX, tol: 30 }, 2),
+        maxDeduction: 2,
+        tip: "Casting: the wrist angle releases early in the downswing. Start down with the lower body and keep the hands leading the clubhead until just before impact.",
+        positions: ["P3", "P4"],
+        frame: delivery,
+      });
+    } else if (shaftTop) missingShaft.push("Lag at delivery");
+  } else {
+    if (shaftTop) {
+      const v = shaftFromHorizontal(p3, shaftTop, mc);
+      metrics.push({
+        id: "shaftTop",
+        label: "Shaft at the top",
+        value: r1(v),
+        unit: "°",
+        detail: "clubhead below (+) or above (−) the hands · 0 = parallel to the ground",
+        target: "-30 to 20°",
+        deduction: deduct(v, { lo: -30, hi: 20, tol: 25 }, 1),
+        maxDeduction: 1,
+        tip: v > 20 ? "Past parallel at the top: the clubhead drops well below the hands. Shorten the backswing so the shaft stops near parallel." : "Very short of parallel at the top. Complete the shoulder turn before starting down.",
+        positions: ["P3"],
+      });
+    } else missingShaft.push("Shaft at the top");
+    if (shaftDel && pDel) {
+      const steep = shaftSteepness(pDel, shaftDel, mc) - club.shaftAngle;
+      metrics.push({
+        id: "shaftDelivery",
+        label: "Shaft plane at delivery",
+        value: r1(steep),
+        unit: "°",
+        detail: `steeper (+) or shallower (−) than the ${club.shaftAngle}° address plane · hands at hip height coming down`,
+        target: "-15 to 12°",
+        deduction: deduct(steep, { lo: -15, hi: 12, tol: 20 }, 1.5),
+        maxDeduction: 1.5,
+        tip: steep > 12 ? "Over the top: the shaft comes down steeper than the address plane. Feel the trail elbow drop toward the hip to start the downswing." : "Shaft drops under the plane coming down. Keep the hands moving down and out toward the ball.",
+        positions: ["P3", "P4"],
+        frame: delivery,
+      });
+    } else missingShaft.push("Shaft plane at delivery");
+  }
 
   if (view === "faceOn") {
     // Head sway: nose x displacement toward/away from target, in shoulder widths.
@@ -313,5 +395,5 @@ export function analyse(frames: Frame[], pos: Positions, view: CameraView, hand:
 
   const total = metrics.reduce((s, m) => s + m.deduction, 0);
   const score = Math.max(0, Math.round((10 - total) * 10) / 10);
-  return { view, score, metrics: metrics.map((m) => ({ ...m, deduction: Math.round(m.deduction * 10) / 10 })), straightKnee };
+  return { view, score, metrics: metrics.map((m) => ({ ...m, deduction: Math.round(m.deduction * 10) / 10 })), straightKnee, missingShaft };
 }

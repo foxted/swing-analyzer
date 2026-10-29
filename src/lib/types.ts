@@ -6,7 +6,17 @@ export type Frame = {
   timeMs: number;
   lm: Pt[] | null;
   world: Pt[] | null;
+  /** Video width / height, so angles can be measured in undistorted image space. */
+  aspect?: number;
+  /** Automatically detected shaft (clubhead end), when the frame showed one. See shaft.ts. */
+  shaft?: Shaft | null;
 };
+
+/** Clubhead position in normalised image coordinates, with a detection quality (best/median ridge ratio). */
+export type Shaft = { x: number; y: number; score: number };
+
+/** Hand-placed clubhead on a frame; overrides the automatic shaft on that frame. */
+export type ClubMark = { frame: number; x: number; y: number };
 
 export type CameraView = "dtl" | "faceOn";
 export type Handedness = "right" | "left";
@@ -48,6 +58,8 @@ export type Analysis = {
   metrics: Metric[];
   /** Knee angle that reads as fully straight for this clip, and whether it came from the clip or a default. */
   straightKnee: { angle: number; calibrated: boolean };
+  /** Shaft-based checks that could not run because no shaft was found on their frame. */
+  missingShaft: string[];
 };
 
 // MediaPipe Pose landmark indices

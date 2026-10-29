@@ -102,8 +102,8 @@ export default function ScorePanel({ analysis, onJump, onSeek, shown, onShown }:
                       </button>
                     ))}
                     {m.frame !== undefined && (
-                      <button className="rounded-full border border-line px-2 py-0.5 text-[11px] font-medium text-warn hover:border-line-strong" onClick={() => onSeek(m.frame!)} title="Jump to the frame where it peaked">
-                        peak #{m.frame}
+                      <button className="rounded-full border border-line px-2 py-0.5 text-[11px] font-medium text-warn hover:border-line-strong" onClick={() => onSeek(m.frame!)} title="Jump to the frame this was measured on">
+                        frame #{m.frame}
                       </button>
                     )}
                   </div>
@@ -154,9 +154,16 @@ export default function ScorePanel({ analysis, onJump, onSeek, shown, onShown }:
         ))}
       </section>
 
+      {analysis.missingShaft.length > 0 && (
+        <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-muted">
+          <span className="font-medium text-fg">Not scored: {analysis.missingShaft.join(", ")}.</span> The shaft was not found on the frame
+          they need. Press <kbd className="rounded border border-line px-1 font-mono">C</kbd> and click the clubhead at the top and at
+          delivery to add them.
+        </p>
+      )}
       <p className="text-xs text-faint">
         Each check compares body landmarks against beginner-friendly ranges. If a P-position looks wrong on the video, set it manually and
-        the score updates. The eye draws a check on the video with its live number.
+        the score updates. The eye draws a check on the video with its live number; drag the stats card on the video to move it.
       </p>
     </aside>
   );

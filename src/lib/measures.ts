@@ -1,4 +1,5 @@
 import { Frame, Handedness, LM, Pt } from "@/lib/types";
+import { ResolvedShaft } from "@/lib/shaft";
 import { angleAt, hands, hipMid, kneeAngle, lead, shoulderMid, shoulderWidth, tiltFromVertical, torsoLen, trail } from "@/lib/geometry";
 
 /**
@@ -17,11 +18,16 @@ export type MeasureCtx = {
   T: number;
   SW: number;
   hand: Handedness;
+  /** Video width / height: normalised landmarks are squashed by it, so angles are measured after undoing it. */
+  aspect: number;
 };
 
-export function measureCtx(p1: Pt[], dir: number, hand: Handedness): MeasureCtx {
-  return { p1, dir, T: Math.max(1e-6, torsoLen(p1)), SW: Math.max(1e-6, shoulderWidth(p1)), hand };
+export function measureCtx(p1: Pt[], dir: number, hand: Handedness, aspect = 1): MeasureCtx {
+  return { p1, dir, T: Math.max(1e-6, torsoLen(p1)), SW: Math.max(1e-6, shoulderWidth(p1)), hand, aspect };
 }
+
+/** Normalised point to undistorted image space (x scaled by the aspect ratio). */
+const sq = (p: { x: number; y: number }, aspect: number) => ({ x: p.x * aspect, y: p.y, z: 0 });
 
 export type MeasureId =
   | "headSwayBack"
@@ -47,7 +53,7 @@ export const measures: Record<MeasureId, (lm: Pt[], c: MeasureCtx) => number> = 
   /** Lead elbow angle, degrees (180 = straight). */
   leadArm: (lm, c) => {
     const L = lead(c.hand);
-    return angleAt(lm[L.shoulder], lm[L.elbow], lm[L.wrist]);
+    return angleAt(sq(lm[L.shoulder], c.aspect), sq(lm[L.elbow], c.aspect), sq(lm[L.wrist], c.aspect));
   },
   /** Lead hip ahead of the lead ankle, % of shoulder width. */
   hipImpact: (lm, c) => {
@@ -80,4 +86,43 @@ export function trailKnee(frame: Frame, hand: Handedness): number {
 /** Lead knee angle (3D when available), degrees; NaN when the leg is not visible. */
 export function leadKnee(frame: Frame, hand: Handedness): number {
   return kneeAngle(frame, lead(hand));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Shaft-based measures. These need the clubhead for the frame (hand mark or automatic detection),
+// so they are not in the `measures` table; callers pass the resolved shaft.
+
+/**
+ * Wrist set: angle at the lead wrist between the lead forearm and the shaft, degrees. 180 = forearm
+ * and shaft in a straight line (no hinge); 90 = fully set. The shaft direction is taken from the
+ * hand centre to the clubhead.
+ */
+export function wristSet(lm: Pt[], shaft: ResolvedShaft, c: MeasureCtx): number {
+  const L = lead(c.hand);
+  const w = sq(lm[L.wrist], c.aspect);
+  const e = sq(lm[L.elbow], c.aspect);
+  const h = sq(hands(lm), c.aspect);
+  const s = sq(shaft, c.aspect);
+  const tip = { x: w.x + (s.x - h.x), y: w.y + (s.y - h.y), z: 0 };
+  return angleAt(e, w, tip);
+}
+
+/** Shaft angle from horizontal, degrees; positive when the clubhead is below the hands. */
+export function shaftFromHorizontal(lm: Pt[], shaft: ResolvedShaft, c: MeasureCtx): number {
+  const h = sq(hands(lm), c.aspect);
+  const s = sq(shaft, c.aspect);
+  return (Math.atan2(s.y - h.y, Math.abs(s.x - h.x)) * 180) / Math.PI;
+}
+
+/**
+ * Shaft steepness on a down-the-line clip: angle between the shaft and the ground, degrees, as the
+ * club profile's `shaftAngle` is defined (clubhead on the ball side, below the hands). Steeper than
+ * the address value means the shaft is above the original plane coming down.
+ */
+export function shaftSteepness(lm: Pt[], shaft: ResolvedShaft, c: MeasureCtx): number {
+  const h = sq(hands(lm), c.aspect);
+  const s = sq(shaft, c.aspect);
+  const dx = (s.x - h.x) * c.dir; // + toward the ball side
+  const dy = s.y - h.y; // + downward
+  return (Math.atan2(dy, dx) * 180) / Math.PI;
 }

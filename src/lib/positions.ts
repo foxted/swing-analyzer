@@ -119,3 +119,15 @@ export function detectPositions(frames: Frame[]): Positions {
 
   return { P1: p1, P2: p2, P3: p3, P4: p4, P5: p5, P6: p6 };
 }
+
+/**
+ * Delivery: the first frame on the way down where the hands drop back below hip height (shaft
+ * roughly parallel to the ground). Where lag and casting are judged. Falls back to 60% of the
+ * way from the top to impact when the hands never cross hip height.
+ */
+export function deliveryFrame(frames: Frame[], pos: Positions): number {
+  const hy = smooth(frames.map((f) => (f.lm ? hands(f.lm).y : NaN)), 1);
+  const hipY = smooth(frames.map((f) => (f.lm ? hipMid(f.lm).y : NaN)), 2);
+  for (let i = pos.P3 + 1; i < pos.P4; i++) if (Number.isFinite(hy[i]) && Number.isFinite(hipY[i]) && hy[i] > hipY[i]) return i;
+  return Math.round(pos.P3 + (pos.P4 - pos.P3) * 0.6);
+}

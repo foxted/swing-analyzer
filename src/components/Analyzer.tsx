@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Overlay, { ChecksState, TracerState } from "./Overlay";
+import Overlay, { CardRect, ChecksState, ShaftState, TracerState } from "./Overlay";
 import Timeline, { Rate } from "./Timeline";
 import ScorePanel from "./ScorePanel";
 import { extractFrames, ModelSize } from "@/lib/pose";
 import { detectPositions, detectView } from "@/lib/positions";
 import { analyse } from "@/lib/metrics";
-import { CameraView, Frame, Handedness, PositionKey, Positions } from "@/lib/types";
+import { CameraView, ClubMark, Frame, Handedness, PositionKey, Positions } from "@/lib/types";
+import { shaftAt, shaftCoverage } from "@/lib/shaft";
 import { CLUB_KEYS, CLUBS, ClubType } from "@/lib/clubs";
 import { BallMark, MIN_MARKS, estimateScale, fitTrajectory, groundLine, refineMark } from "@/lib/tracer";
 import { canExport, downloadBlob, exportVideo } from "@/lib/export";
@@ -42,14 +43,24 @@ export default function Analyzer() {
   const [rate, setRate] = useState<Rate>(1);
   const [loop, setLoop] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
-  const [show, setShow] = useState({ skeleton: true, lines: true, ghost: false, tracer: true });
+  const [show, setShow] = useState({ skeleton: true, lines: true, ghost: false, tracer: true, shaft: true });
   const [marks, setMarks] = useState<BallMark[]>([]);
+  const [clubMarks, setClubMarks] = useState<ClubMark[]>([]);
+  /** Club-marking mode: a click places the clubhead for the current frame. Exclusive with ball marking. */
+  const [clubMarking, setClubMarking] = useState(false);
   /** Check ids drawn on the video (and burnt into exports). */
   const [shownChecks, setShownChecks] = useState<string[]>([]);
   const [marking, setMarking] = useState(false);
   /** User-dragged horizon (image y, 0..1) for DTL clips; null = use the estimate. */
   const [horizonOverride, setHorizonOverride] = useState<number | null>(null);
   const horizonDrag = useRef<{ pointerId: number; moved: boolean } | null>(null);
+  /** Stats card position on the video, dragged by the user; null = default. */
+  const [cardPos, setCardPos] = useState<{ x: number; y: number } | null>(null);
+  const cardRect = useRef<CardRect | null>(null);
+  const cardDrag = useRef<{ pointerId: number; dx: number; dy: number } | null>(null);
+  const onLayout = useCallback((card: CardRect | null) => {
+    cardRect.current = card;
+  }, []);
   const [exporting, setExporting] = useState<{ fraction: number } | null>(null);
   const exportAbort = useRef<AbortController | null>(null);
   const exportLock = useRef(false);
@@ -68,8 +79,8 @@ export default function Analyzer() {
   );
 
   const analysis = useMemo(
-    () => (positions && frames.length ? analyse(frames, positions, view, hand, clubProfile) : null),
-    [frames, positions, view, hand, clubProfile]
+    () => (positions && frames.length ? analyse(frames, positions, view, hand, clubProfile, clubMarks) : null),
+    [frames, positions, view, hand, clubProfile, clubMarks]
   );
 
   const address = positions ? frames[positions.P1] : undefined;
@@ -95,7 +106,7 @@ export default function Analyzer() {
     [marks, positions, fps, view, horizon, scale]
   );
 
-  const settings = (): ClipSettings => ({ fps, model, hand, club, clubLabel, viewOverride, show, marks, horizonOverride, shownChecks });
+  const settings = (): ClipSettings => ({ fps, model, hand, club, clubLabel, viewOverride, show, marks, clubMarks, horizonOverride, shownChecks, cardPos });
 
   const applySettings = (st: ClipSettings) => {
     setFps(st.fps);
@@ -104,10 +115,12 @@ export default function Analyzer() {
     setClub(st.club);
     setClubLabel(st.clubLabel ?? "");
     setViewOverride(st.viewOverride);
-    setShow(st.show);
+    setShow({ shaft: true, ...st.show });
     setMarks(st.marks);
+    setClubMarks(st.clubMarks ?? []);
     setHorizonOverride(st.horizonOverride);
     setShownChecks(st.shownChecks);
+    setCardPos(st.cardPos ?? null);
   };
 
   const resetClipState = () => {
@@ -116,9 +129,12 @@ export default function Analyzer() {
     setFrames([]);
     setPositions(null);
     setMarks([]);
+    setClubMarks([]);
     setMarking(false);
+    setClubMarking(false);
     setHorizonOverride(null);
     setShownChecks([]);
+    setCardPos(null);
     setCurrent(0);
     setPlaying(false);
     setStage("idle");
@@ -224,7 +240,7 @@ export default function Analyzer() {
     }, 600);
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, fileInfo, positions, frames, fps, model, hand, club, clubLabel, viewOverride, show, marks, horizonOverride, shownChecks, analysis, view]);
+  }, [stage, fileInfo, positions, frames, fps, model, hand, club, clubLabel, viewOverride, show, marks, clubMarks, horizonOverride, shownChecks, cardPos, analysis, view]);
 
   const run = async () => {
     const v = videoRef.current;
@@ -314,8 +330,16 @@ export default function Analyzer() {
         e.preventDefault();
         setPlaying((p) => !p);
       } else if (e.key === "l" || e.key === "L") setLoop((l) => !l);
-      else if (e.key === "b" || e.key === "B") setMarking((m) => !m);
-      else if (e.key === "Escape") setMarking(false);
+      else if (e.key === "b" || e.key === "B") {
+        setClubMarking(false);
+        setMarking((m) => !m);
+      } else if (e.key === "c" || e.key === "C") {
+        setMarking(false);
+        setClubMarking((m) => !m);
+      } else if (e.key === "Escape") {
+        setMarking(false);
+        setClubMarking(false);
+      }
       else if (/^[1-6]$/.test(e.key) && positions) seekTo(positions[`P${e.key}` as PositionKey]);
     };
     window.addEventListener("keydown", onKey);
@@ -331,6 +355,7 @@ export default function Analyzer() {
     exportLock.current = true;
     setPlaying(false);
     setMarking(false);
+    setClubMarking(false);
     const ac = new AbortController();
     exportAbort.current = ac;
     setExporting({ fraction: 0 });
@@ -354,6 +379,7 @@ export default function Analyzer() {
             club: clubProfile,
             show,
             tracer: { traj: trajectory, marks, t: (index - positions.P4) / fps, showMarks: false },
+            shaft: { current: shaftAt(frames[index], clubMarks), marks: clubMarks, showMarks: false },
             checks: checksFor(index),
           }),
         onProgress: (fraction, index) => {
@@ -378,10 +404,31 @@ export default function Analyzer() {
     return Math.abs(e.clientY - (r.top + horizon * r.height)) <= HORIZON_GRAB_PX;
   };
 
-  // Pointer down near the horizon line starts a drag; everything else is a click that places
-  // (or replaces) the ball mark for the current frame.
+  /** Pointer position in video pixels (the overlay canvas is sized to the video). */
+  const videoPoint = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * dims.w, y: ((e.clientY - r.top) / r.height) * dims.h };
+  };
+  const overCard = (e: React.PointerEvent<HTMLDivElement>) => {
+    const c = cardRect.current;
+    if (!c || !dims.w) return false;
+    const p = videoPoint(e);
+    return p.x >= c.x && p.x <= c.x + c.w && p.y >= c.y && p.y <= c.y + c.h;
+  };
+
+  // Pointer down on the stats card drags it; near the horizon line drags that; everything else in
+  // a marking mode is a click that places (or replaces) the mark for the current frame.
   const onVideoPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!marking || stage !== "ready" || e.button !== 0) return;
+    if (stage !== "ready" || e.button !== 0 || exporting) return;
+    if (overCard(e)) {
+      const p = videoPoint(e);
+      const c = cardRect.current!;
+      cardDrag.current = { pointerId: e.pointerId, dx: p.x - c.x, dy: p.y - c.y };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
+    if (!marking) return;
     if (nearHorizon(e)) {
       horizonDrag.current = { pointerId: e.pointerId, moved: false };
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -389,6 +436,16 @@ export default function Analyzer() {
     }
   };
   const onVideoPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const cd = cardDrag.current;
+    if (cd && cd.pointerId === e.pointerId) {
+      const p = videoPoint(e);
+      setCardPos({ x: (p.x - cd.dx) / dims.w, y: (p.y - cd.dy) / dims.h });
+      return;
+    }
+    if (!marking && cardRect.current) {
+      e.currentTarget.style.cursor = overCard(e) ? "grab" : "";
+      return;
+    }
     const d = horizonDrag.current;
     if (d && d.pointerId === e.pointerId) {
       d.moved = true;
@@ -399,6 +456,12 @@ export default function Analyzer() {
     if (marking && view === "dtl") e.currentTarget.style.cursor = nearHorizon(e) ? "ns-resize" : "";
   };
   const onVideoPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const cd = cardDrag.current;
+    if (cd && cd.pointerId === e.pointerId) {
+      cardDrag.current = null;
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      return;
+    }
     const d = horizonDrag.current;
     if (d && d.pointerId === e.pointerId) {
       horizonDrag.current = null;
@@ -406,9 +469,14 @@ export default function Analyzer() {
       return; // a grab of the horizon never places a mark, even without movement
     }
     const v = videoRef.current;
-    if (!marking || stage !== "ready" || !v || e.button !== 0) return;
+    if (stage !== "ready" || !v || e.button !== 0) return;
     const r = e.currentTarget.getBoundingClientRect();
     const raw = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+    if (clubMarking) {
+      setClubMarks((ms) => [...ms.filter((m) => m.frame !== current), { frame: current, ...raw }].sort((a, b) => a.frame - b.frame));
+      return;
+    }
+    if (!marking) return;
     const p = e.shiftKey ? raw : refineMark(v, raw.x, raw.y);
     setMarks((ms) => [...ms.filter((m) => m.frame !== current), { frame: current, ...p }].sort((a, b) => a.frame - b.frame));
   };
@@ -419,9 +487,21 @@ export default function Analyzer() {
     ? { traj: trajectory, marks, t: (current - positions.P4) / fps, showMarks: marking, horizon }
     : undefined;
   const landingFrame = trajectory?.tLand != null && positions ? Math.round(positions.P4 + trajectory.tLand * fps) : null;
+  const shaftState: ShaftState | undefined = positions ? { current: shaftAt(frame, clubMarks), marks: clubMarks, showMarks: clubMarking } : undefined;
+  const coverage = shaftCoverage(frames, clubMarks);
   const checksFor = (index: number): ChecksState | undefined =>
     analysis && positions && shownChecks.length
-      ? { metrics: analysis.metrics, selected: shownChecks, score: analysis.score, positions, currentIndex: index, straightKnee: analysis.straightKnee.angle }
+      ? {
+          metrics: analysis.metrics,
+          selected: shownChecks,
+          score: analysis.score,
+          positions,
+          currentIndex: index,
+          straightKnee: analysis.straightKnee.angle,
+          shaft: shaftAt(frames[index], clubMarks),
+          club: clubProfile,
+          cardPos,
+        }
       : undefined;
   const checks = checksFor(current);
 
@@ -541,7 +621,7 @@ export default function Analyzer() {
         <section className="flex min-w-0 flex-col gap-3 lg:min-h-0">
           {src && (
             <div
-              className={`relative mx-auto max-h-[72vh] max-w-full overflow-hidden rounded-xl bg-black lg:min-h-0 lg:max-h-none lg:flex-1 ${marking ? "cursor-crosshair ring-2 ring-accent" : ""}`}
+              className={`relative mx-auto max-h-[72vh] max-w-full overflow-hidden rounded-xl bg-black lg:min-h-0 lg:max-h-none lg:flex-1 ${marking || clubMarking ? "cursor-crosshair ring-2 ring-accent" : ""}`}
               style={{ aspectRatio: dims.w && dims.h ? `${dims.w} / ${dims.h}` : "9 / 16" }}
               onPointerDown={onVideoPointerDown}
               onPointerMove={onVideoPointerMove}
@@ -563,7 +643,7 @@ export default function Analyzer() {
                 }}
               />
               {dims.w > 0 && (
-                <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} club={clubProfile} show={show} tracer={tracer} checks={checks} />
+                <Overlay width={dims.w} height={dims.h} frame={frame} address={address} view={view} hand={hand} club={clubProfile} show={show} tracer={tracer} shaft={shaftState} checks={checks} onLayout={onLayout} />
               )}
               {stage === "processing" && (
                 <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20">
@@ -575,10 +655,10 @@ export default function Analyzer() {
           {stage === "ready" && positions && (
             <>
               <div className="flex shrink-0 items-center gap-4 text-xs text-muted">
-                {(["skeleton", "lines", "ghost", "tracer"] as const).map((k) => (
-                  <label key={k} className="flex items-center gap-1.5">
+                {(["skeleton", "lines", "ghost", "tracer", "shaft"] as const).map((k) => (
+                  <label key={k} className="flex items-center gap-1.5" title={k === "shaft" ? `Club shaft from your marks or the automatic detection (found on ${coverage.auto} of ${frames.length} frames)` : undefined}>
                     <input type="checkbox" checked={show[k]} onChange={(e) => setShow({ ...show, [k]: e.target.checked })} />
-                    {k === "ghost" ? "address ghost" : k === "lines" ? "reference lines" : k === "tracer" ? "ball tracer" : "skeleton"}
+                    {k === "ghost" ? "address ghost" : k === "lines" ? "reference lines" : k === "tracer" ? "ball tracer" : k === "shaft" ? "shaft" : "skeleton"}
                   </label>
                 ))}
                 <span className="mx-1 h-4 w-px bg-line" />
@@ -591,6 +671,23 @@ export default function Analyzer() {
                 >
                   {marking ? "marking ball… (esc)" : "mark ball (B)"}
                 </button>
+                <button
+                  className={`rounded-md border px-2 py-0.5 ${clubMarking ? "border-warn text-warn" : "border-line hover:border-line-strong"}`}
+                  onClick={() => {
+                    setMarking(false);
+                    setClubMarking((m) => !m);
+                  }}
+                  aria-pressed={clubMarking}
+                  disabled={!!exporting}
+                  title="Mark the clubhead on the current frame by clicking it (C). Overrides the automatic shaft on that frame."
+                >
+                  {clubMarking ? "marking club… (esc)" : "mark club (C)"}
+                </button>
+                {cardPos && (
+                  <button className="rounded-md border border-line px-2 py-0.5 hover:border-line-strong" onClick={() => setCardPos(null)} title="Put the stats card back at its default spot">
+                    reset card
+                  </button>
+                )}
                 {frame && !frame.lm && <span className="text-warn">no pose detected on this frame</span>}
                 <span className="ml-auto flex items-center gap-2">
                   {exporting ? (
@@ -655,6 +752,44 @@ export default function Analyzer() {
                     </button>
                   )}
                 </div>
+              )}
+              {(clubMarks.length > 0 || clubMarking) && (
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5 text-xs text-muted">
+                  <span>
+                    clubhead marks · auto-detected on {coverage.auto} of {frames.length} frames
+                    {clubMarks.length ? ":" : " · none placed yet"}
+                  </span>
+                  {clubMarks.map((m) => {
+                    const here = m.frame === current;
+                    return (
+                      <span key={m.frame} className={`inline-flex items-center overflow-hidden rounded-md border ${here ? "border-warn text-warn" : "border-line"}`}>
+                        <button className="px-1.5 py-0.5 tabular-nums hover:bg-panel-2" onClick={() => seekTo(m.frame)} title={`Jump to frame ${m.frame}`}>
+                          #{m.frame}
+                        </button>
+                        <button
+                          className="border-l border-line px-1.5 py-0.5 hover:bg-panel-2 hover:text-bad"
+                          onClick={() => setClubMarks((ms) => ms.filter((x) => x.frame !== m.frame))}
+                          title={`Delete clubhead mark #${m.frame}`}
+                          aria-label={`Delete clubhead mark ${m.frame}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                  {clubMarks.length > 0 && (
+                    <button className="rounded-md border border-line px-2 py-0.5 hover:border-line-strong" onClick={() => setClubMarks([])}>
+                      clear all
+                    </button>
+                  )}
+                </div>
+              )}
+              {clubMarking && (
+                <p className="shrink-0 text-xs text-muted">
+                  Click the clubhead. The shaft is detected automatically where it is sharp; a mark replaces it on that frame. The checks
+                  read it at the top (P3) and at delivery (hands back at hip height coming down), so mark those two frames when the dashed
+                  automatic shaft is missing or wrong there. Re-click a frame to move its mark.
+                </p>
               )}
               {marking && (
                 <p className="shrink-0 text-xs text-muted">
