@@ -1,0 +1,3 @@
+# core-js only prints a funding notice in its postinstall; pnpm 12 fails CI installs on unapproved build scripts.
+ignoredBuiltDependencies:
+  - core-js
