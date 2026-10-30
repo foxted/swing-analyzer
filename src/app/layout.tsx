@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Public_Sans } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import PostHogProvider from "@/components/PostHogProvider";
 import "./globals.css";
 
 const sans = Public_Sans({ subsets: ["latin"], variable: "--font-public-sans", display: "swap" });
@@ -19,7 +21,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="min-h-screen font-sans">{children}</body>
+      <body className="min-h-screen font-sans">
+        <PostHogProvider>{children}</PostHogProvider>
+        <Analytics />
+      </body>
     </html>
   );
 }

@@ -1,6 +1,6 @@
 # Swing Analyzer
 
-Local, in-browser golf swing analysis. Drop a down-the-line or face-on clip, get a stick figure, reference lines, P1-P6 positions and an explainable score out of 10. Nothing leaves the machine; pose detection runs on-device with MediaPipe (WASM + WebGPU/WebGL).
+Local, in-browser golf swing analysis. Drop a down-the-line or face-on clip, get a stick figure, reference lines, P1-P6 positions and an explainable score out of 10. The video never leaves the machine; pose detection runs on-device with MediaPipe (WASM + WebGPU/WebGL). Only anonymous usage analytics are sent (see below).
 
 ## Run
 
@@ -131,6 +131,10 @@ The app opens on a home screen: a drop zone, and once anything has been analysed
 The club type (wedge, iron, hybrid, wood, driver) drives the reference lines and target ranges; the text box next to it takes the actual club (“7-iron”), which is saved with the clip, shown on its card and used in the on-video captions.
 
 The palette and type follow roundr.golf, light and dark. The theme follows the OS until the button at the right of the header picks one (system → light → dark); the choice is kept in localStorage and applied before first paint. Both sets of colours live at the top of `src/app/globals.css`.
+
+## Analytics
+
+Vercel Web Analytics (`@vercel/analytics`, enabled on the Vercel project) and PostHog (`posthog-js`, project "swing-analyzer" in the WhatDaFox org, US cloud) both load from `src/app/layout.tsx`. PostHog needs `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST`; `vercel env pull` writes them to `.env.local`, and without a key nothing is initialised. PostHog traffic goes through the `/ingest` rewrite in `next.config.ts` so it is served from our own domain. Pageviews, clicks and exceptions are captured; session replay is off and no video or pose data is ever sent.
 
 ## Export
 
