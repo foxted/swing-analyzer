@@ -15,6 +15,7 @@ import { canExport, downloadBlob, exportVideo } from "@/lib/export";
 import { drawOverlay } from "@/lib/overlay-draw";
 import { ClipMeta, ClipSettings, deleteClip, fileKey, listClips, loadClip, requestPersistence, saveClip } from "@/lib/store";
 import Home from "./Home";
+import { track } from "@/lib/analytics";
 import ThemeToggle from "./ThemeToggle";
 
 type Stage = "idle" | "loading-model" | "processing" | "ready";
@@ -184,6 +185,7 @@ export default function Analyzer() {
     setFileInfo(info);
     setSrc(URL.createObjectURL(file));
     setFileName(file.name);
+    track.uploaded({ size_bytes: file.size, mime: file.type, fps, model, club });
   };
 
   const refreshRecent = () => listClips().then(setRecent);
@@ -249,6 +251,8 @@ export default function Analyzer() {
     setPlaying(false);
     const ac = new AbortController();
     abortRef.current = ac;
+    const t0 = performance.now();
+    let stageNow: "loading-model" | "processing" = "loading-model";
     try {
       setStage("loading-model");
       setProgress({ done: 0, total: 0 });
@@ -257,6 +261,7 @@ export default function Analyzer() {
         fps,
         model,
         (done, total) => {
+          stageNow = "processing";
           setStage("processing");
           setProgress({ done, total });
         },
@@ -271,13 +276,26 @@ export default function Analyzer() {
       if (fileInfo) {
         const viewNow = viewOverride === "auto" ? detectView(fr) : viewOverride;
         const score = analyse(fr, pos, viewNow, hand, clubProfile).score;
+        track.completed({
+          size_bytes: fileInfo.size,
+          mime: fileRef.current?.type ?? "",
+          fps,
+          model,
+          club,
+          view: viewNow,
+          score: Math.round(score * 10) / 10,
+          frames: fr.length,
+          duration_ms: Math.round(performance.now() - t0),
+        });
         const thumb = await captureThumb(pos.P4 / fps);
         await saveClip(fileInfo, { ...settings(), marks: [], horizonOverride: null, shownChecks: [] }, { score, view: viewNow, thumb }, { frames: fr, positions: pos }, fileRef.current);
         refreshRecent();
       }
       v.currentTime = pos.P1 / fps;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const reason = e instanceof Error ? e.message : String(e);
+      track.failed({ reason, stage: stageNow, duration_ms: Math.round(performance.now() - t0) });
+      setError(reason);
       setStage("idle");
     }
   };
@@ -361,6 +379,7 @@ export default function Analyzer() {
     setExporting({ fraction: 0 });
     setError(null);
     const base = fileName.replace(/\.[^.]+$/, "") || "swing";
+    const t0 = performance.now();
     try {
       const { blob, ext } = await exportVideo({
         video: v,
@@ -388,6 +407,7 @@ export default function Analyzer() {
         },
       });
       downloadBlob(blob, `${base}_analysed${rate !== 1 ? `_${rate}x` : ""}.${ext}`);
+      track.exported({ view, rate, ext, size_bytes: blob.size, duration_ms: Math.round(performance.now() - t0) });
     } catch (e) {
       if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : String(e));
     } finally {
