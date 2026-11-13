@@ -172,7 +172,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, p: DrawParams): { car
 
   // Club shaft: hands to clubhead, from a hand mark or the automatic detection.
   if (shaft && frame?.lm) {
-    if (show.shaft && shaft.current) drawShaft(ctx, px(hands(frame.lm)), px(shaft.current), shaft.current.source, lw);
+    if (show.shaft && shaft.current) drawShaft(ctx, px(shaft.current.from ?? hands(frame.lm)), px(shaft.current), shaft.current.source, lw);
     if (shaft.showMarks) drawClubMarks(ctx, shaft.marks, frame.index, width, height, lw);
   }
 

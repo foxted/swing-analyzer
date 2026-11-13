@@ -34,11 +34,11 @@ No server and no AI API. Everything runs in the browser.
 
 All of these are hand-tuned for a beginner to mid-handicap golfer, not tour data. Change them in the file named.
 
-**Camera view** (`positions.ts`): shoulder width divided by torso length on the first frame with a pose; above 0.55 is face on, otherwise down the line. Override with the `view` dropdown.
+**Camera view** (`positions.ts`): shoulder width divided by torso length, median over the 30 frames up to address (the first frame with a pose when there are no positions yet); above 0.55 is face on, otherwise down the line. Override with the `view` dropdown.
 
 **Target direction**: face on, the lead shoulder's side of the image is toward the target; down the line, the side where the hands hang relative to the hips is the ball side.
 
-**P-positions** (`positions.ts`), from hand and hip landmark motion only, after light smoothing:
+**P-positions** (`positions.ts`). Hand series are median-filtered (5 frames) then lightly smoothed, because the pose model drops the wrists somewhere else for a frame or two on backlit clips and one such jump is faster than any real downswing. When the shaft was tracked, address and impact come from the club: address is the last frame where the shaft has pointed the same way (within 4°) for 0.3 s before it turns more than 80° away; impact is where the hands, having swung away from their address position, are back closest to it (searched from where they are within 35% of their furthest, or from where the shaft is back within 25° of its address direction when that agrees). Of several such swings in a clip the one with the fastest hands wins. Without a tracked shaft, or without that still-swing-return pattern, the rules in the table apply:
 
 | Position | Rule |
 |---|---|
@@ -48,7 +48,7 @@ All of these are hand-tuned for a beginner to mid-handicap golfer, not tour data
 | P2 | First frame after P1 where the hands rise above hip height; if never, 40% of the way from P1 to P3 |
 | P5 | First frame after P4 where the hands rise above hip height |
 | P6 finish | First run of 4 quiet frames after P5, else the last frame |
-| Delivery | Not a card, used by the shaft checks: first frame after P3 where the hands drop back below hip height, else 60% of the way from P3 to P4 |
+| Delivery | Not a card, used by the shaft checks: first frame after P3 where the hands drop back below hip height, else 60% of the way from P3 to P4. Frames where the tracked shaft still points more than 30° above the hands are skipped: the club has not started down, the pose has dropped the hands early |
 
 Every position can be set by hand with the `set` button under its card, and the score recomputes.
 
@@ -102,7 +102,7 @@ Per-club ranges (`clubs.ts`). The club type also sets the shaft-plane line at ad
 
 The "Work on" list shows the three largest deductions of at least 0.3.
 
-**Shaft detector** (`shaft.ts`, `ridge.ts`): square crop of 2.9 torso lengths around the hands, downscaled to 176 px; rays every 1.5° from the hand centre, skipping the first 8% and any direction within 16° of either forearm; ridge response = pixel on the ray minus the mean of the pixels 2 px either side; the best consistent-sign run from near the origin gives the direction and the clubhead; accepted when its score is at least 2× the crop's median |response|, 2.5× the 95th percentile of the other directions, and the run is at least 22% of the crop radius. The previous frame's direction is a soft prior (sigma 30°). Angles for the wrist and shaft checks are measured in undistorted image space (x scaled by the video's aspect ratio); the lead-arm angle now is too.
+**Shaft detector** (`shaft.ts`, `ridge.ts`): square crop of 2.9 torso lengths around the hands at 480 px (drawn at 960 and box-averaged, so a shaft is one to two pixels wide and not aliased away). Ridge response per pixel and orientation (0, 45, 90, 135°) = how much the pixel differs from both neighbours 3 px across the line, so edges and anything wider than a few pixels (arms, legs, the body outline) score 0. Pixels above the noise floor (2× the median response, at least 2.5 levels) vote for the lines through them that pass within 0.5 torso of the hand centre; the 15 strongest are walked outwards and the longest consistent run from within 0.8 torso of the hands gives the two ends. Up to 5 candidates per frame are kept, each at least 0.5 torso long, with quality = summed response over (noise floor × torso length). **Tracking** then picks at most one per frame. Dropped first: lines found in the same place in the image with the hands in four or more places 0.35 torso apart (scenery), and lines within 12° of a limb or the trunk whose midpoint is within 0.2 torso of it (creases and seams). Quality is marked down by 1.5 per unit that response per torso length falls short of 5, and by 8 per torso length the grip end is beyond 0.3 torso from the hands. A Viterbi pass keeps a candidate when its quality is 3 or more and its direction is within 10° + 1200°/s of the previous frame's; starting a track costs a further 2. Angles for the wrist and shaft checks are measured in undistorted image space (x scaled by the video's aspect ratio); the lead-arm angle now is too.
 
 **Ball tracer** (`tracer.ts`): at least 3 marks; gravity prior from the golfer's size assuming 1.75 m tall (fallback scale 0.2 image heights per metre), prior weight σ = 0.004 per mark; flight capped at 8 s; landing accepted from 0.2 s after P4; default horizon at a 0.5 m camera height.
 
@@ -120,7 +120,7 @@ The path ends where the ball meets the ground, not where it leaves the frame. Fa
 
 ## Club shaft, wrist set and casting
 
-The pose model sees the body, not the club, so the shaft comes from the pixels. On every frame of the analysis, `src/lib/shaft.ts` scans the directions out of the hand centre for a thin straight line with consistent contrast and takes the longest, strongest one as the shaft, with its end as the clubhead. It works wherever the shaft is sharp in the frame and fails on motion blur (60 fps phone clips through the downswing) and when the shaft points at the camera. It draws as a dashed pink line (the `shaft` helper toggle). Press `c` (or `mark club`) and click the clubhead on any frame to place a solid mark that overrides the detection there; re-click to move it, `×` in the list under the video deletes it. Marks are saved with the clip.
+The pose model sees the body, not the club, so the shaft comes from the pixels. On every frame of the analysis, `src/lib/shaft.ts` looks for thin straight lines passing close to the hands; once the clip is done it keeps, per frame, the one that fits a continuous club motion, and nothing when no line is convincing. It works wherever the shaft is sharp in the frame and fails on motion blur (60 fps phone clips through the downswing) and when the shaft points at the camera. It draws as a dashed pink line (the `shaft` helper toggle). Press `c` (or `mark club`) and click the clubhead on any frame to place a solid mark that overrides the detection there; re-click to move it, `×` in the list under the video deletes it. Marks are saved with the clip.
 
 Four checks read the shaft, two per view, on two frames: the top (P3) and delivery, the first frame on the way down where the hands drop back below hip height. Face on: **Wrist set at the top** (angle between the lead forearm and the shaft, 180° = no hinge, target 55 to 110°) and **Lag at delivery**, the casting check (the same angle at delivery, 115° or less, with how much it opened since the top). Down the line: **Shaft at the top** (degrees from parallel to the ground, + = clubhead below the hands) and **Shaft plane at delivery** (steeper or shallower than the club's address shaft angle, + = over the top). A check whose frame has no shaft is not scored and the panel says so with a hint to mark those two frames. The eye on each draws the shaft and the angle on the video like the other checks. Face on is the view for casting and lag; down the line is the view for plane. Wrist cup or bow at the top is not measured: the three hand points per side cannot tell flat from cupped.
 
@@ -150,6 +150,6 @@ Vercel Web Analytics (`@vercel/analytics`, enabled on the Vercel project) and Po
 ## Known limits
 
 - No ball detection: the tracer needs hand-placed marks. The fit ignores drag and spin, and on DTL clips the landing is only as good as the horizon line, so long extrapolations past the last mark are approximate.
-- Shaft detection is pixel-based and needs a sharp shaft: expect gaps through the downswing on 60 fps clips (240 fps slow motion is fine) and whenever the shaft points at the camera. Mark the clubhead by hand on the top and delivery frames when a shaft check is missing. P2/P5 still use hands-at-hip-height as the proxy for shaft parallel.
-- Auto view detection uses shoulder width vs torso height at the first frame; override with the `view` dropdown if it guesses wrong.
+- Shaft detection is pixel-based and needs a sharp shaft: expect gaps through the downswing on 60 fps clips (240 fps slow motion is fine) and whenever the shaft points at the camera, which includes the top of the backswing down the line. It prefers no shaft to a doubtful one. Busy backgrounds (beams, cables, poles behind the golfer) can still be taken for the shaft on frames where the real one is blurred. Clips analysed before the tracker existed keep their old detections until analysed again. Mark the clubhead by hand on the top and delivery frames when a shaft check is missing. P2/P5 still use hands-at-hip-height as the proxy for shaft parallel.
+- Auto view detection uses shoulder width vs torso height at address; override with the `view` dropdown if it guesses wrong.
 - Processing speed depends on the model: lite ~15 ms/frame, heavy ~60 ms/frame on an M-series Mac.

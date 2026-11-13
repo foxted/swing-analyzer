@@ -81,6 +81,20 @@ export function smooth(series: number[], radius = 2): number[] {
   });
 }
 
+/** Running median over frames for a scalar series: removes one- or two-frame outliers without blurring real motion. */
+export function median(series: number[], radius = 2): number[] {
+  return series.map((v, i) => {
+    const w: number[] = [];
+    for (let k = -radius; k <= radius; k++) {
+      const x = series[i + k];
+      if (x !== undefined && Number.isFinite(x)) w.push(x);
+    }
+    if (!w.length) return v;
+    w.sort((a, b) => a - b);
+    return w.length % 2 ? w[w.length >> 1] : (w[w.length / 2 - 1] + w[w.length / 2]) / 2;
+  });
+}
+
 /** Mean landmark displacement between consecutive frames (motion energy). */
 export function motionEnergy(frames: Frame[]): number[] {
   return frames.map((f, i) => {

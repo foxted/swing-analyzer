@@ -1,6 +1,6 @@
 import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
-import { Frame, Shaft } from "@/lib/types";
-import { detectShaft } from "@/lib/shaft";
+import { Frame } from "@/lib/types";
+import { detectShaftCands, trackShafts } from "@/lib/shaft";
 
 const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
 const MODELS = {
@@ -66,7 +66,6 @@ export async function extractFrames(
   const total = Math.max(1, Math.floor(video.duration * fps));
   const frames: Frame[] = [];
   const aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : undefined;
-  let prevShaft: Shaft | null = null;
   video.pause();
   for (let i = 0; i < total; i++) {
     if (signal?.aborted) break;
@@ -76,12 +75,12 @@ export async function extractFrames(
     const res = lm.detectForVideo(video, nextTimestamp());
     const pose = res.landmarks[0] ?? null;
     const world = res.worldLandmarks[0] ?? null;
-    // Shaft from the pixels around the hands, on the same seeked frame.
-    const shaft: Shaft | null = pose ? detectShaft(video, pose, prevShaft) : null;
-    prevShaft = shaft;
-    frames.push({ index: i, timeMs, lm: pose, world, aspect, shaft });
+    // Shaft candidates from the pixels around the hands, on the same seeked frame.
+    const shaftCands = pose ? detectShaftCands(video, pose) : [];
+    frames.push({ index: i, timeMs, lm: pose, world, aspect, shaft: null, shaftCands });
     if (i % 5 === 0) onProgress(i + 1, total);
   }
   onProgress(total, total);
+  trackShafts(frames, fps);
   return frames;
 }

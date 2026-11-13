@@ -131,7 +131,7 @@ function drawGeometry(env: Env, m: Metric, id: string, live: (id: MeasureId) => 
     case "lag": {
       const s = checks.shaft;
       if (!s) return;
-      const h = px(hands(lm));
+      const h = px(s.from ?? hands(lm));
       const head = px(s);
       const w = px(lm[L.wrist]);
       line(env, h, head, c, env.u * 1.4);
@@ -142,7 +142,7 @@ function drawGeometry(env: Env, m: Metric, id: string, live: (id: MeasureId) => 
     case "shaftTop": {
       const s = checks.shaft;
       if (!s) return;
-      const h = px(hands(lm));
+      const h = px(s.from ?? hands(lm));
       const head = px(s);
       const half = env.width * 0.1;
       line(env, { x: h.x - half, y: h.y }, { x: h.x + half, y: h.y }, COLOR.ref, env.u * 0.6, true);
@@ -153,7 +153,7 @@ function drawGeometry(env: Env, m: Metric, id: string, live: (id: MeasureId) => 
     case "shaftDelivery": {
       const s = checks.shaft;
       if (!s || !checks.club) return;
-      const h = px(hands(lm));
+      const h = px(s.from ?? hands(lm));
       const head = px(s);
       // Address plane through the current hands for reference.
       const rad = (checks.club.shaftAngle * Math.PI) / 180;

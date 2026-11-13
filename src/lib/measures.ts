@@ -95,13 +95,13 @@ export function leadKnee(frame: Frame, hand: Handedness): number {
 /**
  * Wrist set: angle at the lead wrist between the lead forearm and the shaft, degrees. 180 = forearm
  * and shaft in a straight line (no hinge); 90 = fully set. The shaft direction is taken from the
- * hand centre to the clubhead.
+ * grip end of a detected line, or the hand centre for a hand mark, to the clubhead.
  */
 export function wristSet(lm: Pt[], shaft: ResolvedShaft, c: MeasureCtx): number {
   const L = lead(c.hand);
   const w = sq(lm[L.wrist], c.aspect);
   const e = sq(lm[L.elbow], c.aspect);
-  const h = sq(hands(lm), c.aspect);
+  const h = sq(shaft.from ?? hands(lm), c.aspect);
   const s = sq(shaft, c.aspect);
   const tip = { x: w.x + (s.x - h.x), y: w.y + (s.y - h.y), z: 0 };
   return angleAt(e, w, tip);
@@ -109,7 +109,7 @@ export function wristSet(lm: Pt[], shaft: ResolvedShaft, c: MeasureCtx): number 
 
 /** Shaft angle from horizontal, degrees; positive when the clubhead is below the hands. */
 export function shaftFromHorizontal(lm: Pt[], shaft: ResolvedShaft, c: MeasureCtx): number {
-  const h = sq(hands(lm), c.aspect);
+  const h = sq(shaft.from ?? hands(lm), c.aspect);
   const s = sq(shaft, c.aspect);
   return (Math.atan2(s.y - h.y, Math.abs(s.x - h.x)) * 180) / Math.PI;
 }
@@ -120,7 +120,7 @@ export function shaftFromHorizontal(lm: Pt[], shaft: ResolvedShaft, c: MeasureCt
  * the address value means the shaft is above the original plane coming down.
  */
 export function shaftSteepness(lm: Pt[], shaft: ResolvedShaft, c: MeasureCtx): number {
-  const h = sq(hands(lm), c.aspect);
+  const h = sq(shaft.from ?? hands(lm), c.aspect);
   const s = sq(shaft, c.aspect);
   const dx = (s.x - h.x) * c.dir; // + toward the ball side
   const dy = s.y - h.y; // + downward

@@ -75,8 +75,8 @@ export default function Analyzer() {
   const restoring = useRef(false);
 
   const view: CameraView = useMemo(
-    () => (viewOverride === "auto" ? (frames.length ? detectView(frames) : "dtl") : viewOverride),
-    [viewOverride, frames]
+    () => (viewOverride === "auto" ? (frames.length ? detectView(frames, positions?.P1) : "dtl") : viewOverride),
+    [viewOverride, frames, positions?.P1]
   );
 
   const analysis = useMemo(
@@ -274,7 +274,7 @@ export default function Analyzer() {
       setCurrent(pos.P1);
       setStage("ready");
       if (fileInfo) {
-        const viewNow = viewOverride === "auto" ? detectView(fr) : viewOverride;
+        const viewNow = viewOverride === "auto" ? detectView(fr, pos.P1) : viewOverride;
         const score = analyse(fr, pos, viewNow, hand, clubProfile).score;
         track.completed({
           size_bytes: fileInfo.size,
